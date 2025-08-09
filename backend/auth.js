@@ -12,6 +12,8 @@ app.use(cors());
 app.use(express.json());
 
 const DB_FILE = './db.json';
+const SESSIONS_FILE = './sessions.json';
+const GRIDB_FILE = './gridb.json';
 const connection = new Connection('https://api.devnet.solana.com', 'confirmed');
 const TOKEN_PROGRAM_ID = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
 const THE_TOKEN_MINT = new PublicKey('7gryqXLucgivS9NHgnA22WFZqLG8jU317pBJYeWkGynH');
@@ -40,13 +42,53 @@ function writeDB(data) {
   fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2));
 }
 
+function readGridB(totalBlocks) {
+  try {
+    const arr = JSON.parse(fs.readFileSync(GRIDB_FILE, 'utf8'));
+    // If the file has fewer blocks, add the remaining as empty
+    if (arr.length < totalBlocks) {
+      for (let i = arr.length; i < totalBlocks; i++) {
+        arr.push({ index: i, owner: null, color: null, visual: null, userBlockIndex: null });
+      }
+      fs.writeFileSync(GRIDB_FILE, JSON.stringify(arr, null, 2));
+    }
+    return arr;
+  } catch (e) {
+    // If the file does not exist or is corrupted, create from scratch
+    const arr = Array.from({ length: readDB().grid.length }, (_, i) => ({ index: i, owner: null, color: null, visual: null, userBlockIndex: null }));
+    fs.writeFileSync(GRIDB_FILE, JSON.stringify(arr, null, 2));
+    return arr;
+  }
+}
+function writeGridB(arr) {
+  fs.writeFileSync(GRIDB_FILE, JSON.stringify(arr, null, 2));
+}
+
+function readSessions() {
+  try {
+    return JSON.parse(fs.readFileSync(SESSIONS_FILE, 'utf8'));
+  } catch (error) {
+    return {};
+  }
+}
+
+function writeSessions(data) {
+  fs.writeFileSync(SESSIONS_FILE, JSON.stringify(data, null, 2));
+}
+
 function generateVerificationToken() {
   return Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
 }
 
-// Session store (memory-based, process restartında silinir)
-const sessions = {};
+function generateResetToken() {
+  return Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+}
 
+function isTokenExpired(expiryTime) {
+  return Date.now() > expiryTime;
+}
+
+// Session management (persistent file-based)
 function generateSessionToken() {
   return Math.random().toString(36).substring(2) + Date.now().toString(36);
 }
@@ -135,9 +177,11 @@ app.post('/login', async (req, res) => {
     return res.status(400).json({ error: 'Invalid password' });
   }
 
-  // Session token üret ve sakla
+  // Generate and store session token
   const sessionToken = generateSessionToken();
+  const sessions = readSessions();
   sessions[sessionToken] = { username: user.username, createdAt: Date.now() };
+  writeSessions(sessions);
 
   res.json({ success: true, username: user.username, color: user.color, walletAddress: user.walletAddress, sentTokens: user.sentTokens, sessionToken });
 });
@@ -185,6 +229,80 @@ app.post('/change-password', async (req, res) => {
   writeDB(data);
 
   res.json({ message: 'Password changed successfully' });
+});
+
+app.post('/forgot-password', async (req, res) => {
+  const { email } = req.body;
+  if (!email) {
+    return res.status(400).json({ error: 'Email is required' });
+  }
+
+  const data = readDB();
+  const user = data.users.find(user => user.email === email);
+
+  if (!user) {
+    // Don't reveal if email exists or not for security
+    return res.json({ message: 'If this email is registered, you will receive a password reset link shortly.' });
+  }
+
+  if (!user.isVerified) {
+    return res.status(400).json({ error: 'Email not verified. Please verify your email first.' });
+  }
+
+  const resetToken = generateResetToken();
+  const resetTokenExpiry = Date.now() + (60 * 60 * 1000); // 1 hour expiry
+
+  user.resetToken = resetToken;
+  user.resetTokenExpiry = resetTokenExpiry;
+  writeDB(data);
+
+  const resetLink = `https://thisisthecoin.com/?token=${resetToken}&email=${email}`;
+  try {
+    await transporter.sendMail({
+      from: '"TheCoin" <volkan@thisisthecoin.com>',
+      to: email,
+      subject: 'TheCoin Password Reset',
+      html: `Hello ${user.username},<br><br>You requested a password reset for your TheCoin account.<br><br>Click the link below to reset your password:<br><a href="${resetLink}">Reset Your Password</a><br><br>This link will expire in 1 hour.<br><br>If you did not request this, please ignore this email.<br><br>TheCoin Team`
+    });
+    res.json({ message: 'If this email is registered, you will receive a password reset link shortly.' });
+  } catch (error) {
+    console.error('Password reset email sending error:', error);
+    res.status(500).json({ error: 'Failed to send password reset email' });
+  }
+});
+
+app.post('/reset-password', async (req, res) => {
+  const { email, token, newPassword } = req.body;
+  if (!email || !token || !newPassword) {
+    return res.status(400).json({ error: 'Email, token, and new password are required' });
+  }
+
+  if (newPassword.length < 8) {
+    return res.status(400).json({ error: 'New password must be at least 8 characters' });
+  }
+
+  const data = readDB();
+  const user = data.users.find(user => user.email === email);
+
+  if (!user) {
+    return res.status(400).json({ error: 'Invalid reset link' });
+  }
+
+  if (!user.resetToken || user.resetToken !== token) {
+    return res.status(400).json({ error: 'Invalid reset token' });
+  }
+
+  if (isTokenExpired(user.resetTokenExpiry)) {
+    return res.status(400).json({ error: 'Reset token has expired. Please request a new password reset.' });
+  }
+
+  const hashedPassword = await bcrypt.hash(newPassword, 10);
+  user.passwordHash = hashedPassword;
+  user.resetToken = null;
+  user.resetTokenExpiry = null;
+  writeDB(data);
+
+  res.json({ message: 'Password reset successfully. You can now login with your new password.' });
 });
 
 app.post('/update-color', async (req, res) => {
@@ -289,13 +407,21 @@ app.post('/update-username', async (req, res) => {
     return res.status(400).json({ error: 'This username is already taken' });
   }
 
-  // Kullanıcı adını güncelle
+  // Update username
   user.username = newUsername;
 
-  // Grid’deki dugBy alanlarını güncelle
+  // Grid'deki dugBy alanlarını güncelle
   data.grid = data.grid.map(block => 
     block.dugBy === currentUsername ? { ...block, dugBy: newUsername } : block
   );
+
+  // GridB'deki owner alanlarını da güncelle (Warzone)
+  const totalBlocks = data.grid.length;
+  const gridBData = readGridB(totalBlocks);
+  const updatedGridB = gridBData.map(block => 
+    block.owner === currentUsername ? { ...block, owner: newUsername } : block
+  );
+  writeGridB(updatedGridB);
 
   writeDB(data);
 
@@ -314,7 +440,7 @@ app.patch('/grid/:index', async (req, res) => {
   }
 
   block.dugBy = dugBy;
-  block.color = color;
+      // block.color = color; // This line removed
 
   if (!receiverAddress) {
     writeDB(data);
@@ -364,9 +490,12 @@ app.patch('/grid/:index', async (req, res) => {
   }
 });
 
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Auth server running at http://0.0.0.0:${PORT}`);
-});
+// Only start the server if this file is run directly (not when required by server.js)
+if (require.main === module) {
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Auth server running at http://0.0.0.0:${PORT}`);
+  });
+}
 
-// Export sessions objesi ve fonksiyonları diğer dosyalarda kullanmak için
-module.exports = { app, sessions };
+// Export sessions object and functions for use in other files
+module.exports = { app, readSessions, writeSessions };

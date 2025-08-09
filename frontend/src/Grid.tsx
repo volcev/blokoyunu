@@ -1,4 +1,5 @@
-import React, { useEffect, useState, useCallback, Dispatch, SetStateAction, useRef } from "react";
+import React, { useEffect, useState, useCallback, Dispatch, SetStateAction } from "react";
+import { createPortal } from "react-dom";
 import "./Grid.css";
 
 type Props = {
@@ -7,10 +8,7 @@ type Props = {
   showSettings: boolean;
   setShowSettings: Dispatch<SetStateAction<boolean>>;
   handleLogout: () => void;
-  setShowMyBlocks: Dispatch<SetStateAction<boolean>>;
   setUsername: Dispatch<SetStateAction<string | null>>;
-  showTopMiners: boolean;
-  setShowTopMiners: Dispatch<SetStateAction<boolean>>;
   tokenBalance: number;
   setTokenBalance: Dispatch<SetStateAction<number>>;
   blockData: Block[];
@@ -26,34 +24,147 @@ type Block = {
 
 type BlockState = "idle" | "digging" | "dug";
 
-type Miner = {
-  name: string;
-  count: number;
-  color: string;
-};
-
-const BLOCKS_PER_ROW = 10;
+// Grid is always 10x10
 const API_BASE = "";
 
-const colorOptions = [
-  "#FFCDD2", "#F8BBD0", "#E1BEE7", "#D1C4E9", "#C5CAE9",
-  "#BBDEFB", "#B2EBF2", "#C8E6C9", "#DCEDC8", "#FFF9C4"
-];
-
-const Grid: React.FC<Props> = ({ username, userColor, showSettings, setShowSettings, handleLogout, setShowMyBlocks, setUsername, showTopMiners, setShowTopMiners, tokenBalance, setTokenBalance, blockData, setBlockData }) => {
+const Grid: React.FC<Props> = ({ username, userColor, showSettings, setShowSettings, handleLogout, setUsername, tokenBalance, setTokenBalance, blockData, setBlockData }) => {
   const [blockStates, setBlockStates] = useState<BlockState[]>([]);
   const [isMining, setIsMining] = useState<boolean>(false);
-  const [sentTokens, setSentTokens] = useState<number>(0);
-  const [topMiners, setTopMiners] = useState<Miner[]>([]);
-  const [userEmail, setUserEmail] = useState<string>('');
-  const [currentPassword, setCurrentPassword] = useState<string>('');
-  const [newPassword, setNewPassword] = useState<string>('');
-  const [confirmPassword, setConfirmPassword] = useState<string>('');
-  const [selectedColor, setSelectedColor] = useState<string | null>(userColor);
-  const [walletAddress, setWalletAddress] = useState<string>('');
-  const [newUsername, setNewUsername] = useState<string>('');
-  const [activeTooltip, setActiveTooltip] = useState<number | null>(null);
-  const tooltipTimeout = useRef<NodeJS.Timeout | null>(null);
+  const [selectedBlockIndex, setSelectedBlockIndex] = useState<number | null>(null);
+  
+  // Block Info Modal State
+  const [showBlockModal, setShowBlockModal] = useState<boolean>(false);
+  
+  // Get safe modal width based on screen size
+  const getModalWidth = () => {
+    const screenWidth = window.screen.width || window.innerWidth;
+    return screenWidth < 400 ? '280px' : '300px';
+  };
+  
+  // Device detection
+  const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent) || /iPad|iPhone|iPod/.test(navigator.userAgent);
+  const isAndroid = /android/i.test(navigator.userAgent);
+  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+  
+  // Aggressive modal CSS protection with Safari-specific handling
+  useEffect(() => {
+    if (!showBlockModal) return;
+    
+    // Lock body scroll on modal open (Safari fix)
+    const originalBodyStyle = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    document.body.style.position = 'fixed';
+    document.body.style.width = '100%';
+    
+    const forceModalCSS = () => {
+      // Find modal elements
+      const overlay = document.querySelector('[style*="z-index: 99999"]');
+      const content = document.querySelector('[style*="border-radius: 12px"][style*="background"]');
+      
+      if (overlay) {
+        const overlayEl = overlay as HTMLElement;
+        overlayEl.style.position = 'fixed';
+        overlayEl.style.top = '0px';
+        overlayEl.style.left = '0px';
+        
+        if (isIOS) {
+          // iOS (Safari + Chrome): Use screen dimensions instead of viewport units
+          overlayEl.style.width = `${window.screen.width}px`;
+          overlayEl.style.height = `${window.screen.height}px`;
+          overlayEl.style.right = '0px';
+          overlayEl.style.bottom = '0px';
+          overlayEl.style.setProperty('-webkit-transform', 'none');
+          overlayEl.style.setProperty('-webkit-zoom', 'normal');
+          overlayEl.style.setProperty('zoom', 'normal');
+        } else if (isAndroid) {
+          // Android-specific: Use visualViewport if available, fallback to window
+          const viewportHeight = window.visualViewport?.height || window.innerHeight;
+          overlayEl.style.width = '100vw';
+          overlayEl.style.height = `${viewportHeight}px`;
+          overlayEl.style.setProperty('zoom', '1');
+          overlayEl.style.setProperty('transform', 'none');
+        } else {
+          // Desktop and other browsers
+          overlayEl.style.width = '100vw';
+          overlayEl.style.height = '100vh';
+          overlayEl.style.setProperty('zoom', '1');
+        }
+        
+        overlayEl.style.transform = 'none';
+        overlayEl.style.zIndex = '2147483647';
+        overlayEl.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
+        overlayEl.style.display = 'flex';
+        overlayEl.style.justifyContent = 'center';
+        overlayEl.style.alignItems = 'center';
+      }
+      
+      if (content) {
+        const contentEl = content as HTMLElement;
+        const modalWidth = isIOS ? (window.screen.width < 400 ? '280px' : '300px') : getModalWidth();
+        
+        contentEl.style.width = modalWidth;
+        contentEl.style.minWidth = modalWidth;
+        contentEl.style.maxWidth = modalWidth;
+        contentEl.style.transform = 'none';
+        contentEl.style.fontSize = '14px';
+        contentEl.style.position = 'relative';
+        contentEl.style.backgroundColor = 'white';
+        contentEl.style.padding = '20px';
+        contentEl.style.borderRadius = '12px';
+        contentEl.style.textAlign = 'center';
+        contentEl.style.margin = '0';
+        contentEl.style.border = 'none';
+        contentEl.style.outline = 'none';
+        
+        if (isIOS) {
+          contentEl.style.setProperty('-webkit-transform', 'none');
+          contentEl.style.setProperty('-webkit-zoom', 'normal');
+          contentEl.style.setProperty('zoom', 'normal');
+          contentEl.style.setProperty('will-change', 'auto');
+        } else {
+          contentEl.style.setProperty('zoom', '1');
+        }
+      }
+    };
+    
+    // Force CSS immediately and frequently for Safari
+    const timer = setInterval(forceModalCSS, isSafari ? 16 : 50); // 60fps for Safari
+    
+    // MutationObserver to watch for style changes
+    const observer = new MutationObserver(forceModalCSS);
+    
+    // Start observing after modal appears
+    setTimeout(() => {
+      const overlay = document.querySelector('[style*="z-index: 99999"]');
+      const content = document.querySelector('[style*="border-radius: 12px"][style*="background"]');
+      
+      if (overlay) {
+        observer.observe(overlay, { 
+          attributes: true, 
+          attributeFilter: ['style', 'class'] 
+        });
+      }
+      
+      if (content) {
+        observer.observe(content, { 
+          attributes: true, 
+          attributeFilter: ['style', 'class'] 
+        });
+      }
+    }, 10);
+    
+    return () => {
+      clearInterval(timer);
+      observer.disconnect();
+      // Restore body scroll
+      document.body.style.overflow = originalBodyStyle;
+      document.body.style.position = '';
+      document.body.style.width = '';
+    };
+  }, [showBlockModal, isAndroid, isIOS, isSafari]);
+
+  // Create user color map
+  const [userColors, setUserColors] = useState<{ [username: string]: string }>({});
 
   const fetchGrid = useCallback(async () => {
     try {
@@ -98,60 +209,40 @@ const Grid: React.FC<Props> = ({ username, userColor, showSettings, setShowSetti
     } catch (error) {
       console.error("Failed to fetch grid data:", error);
     }
-  }, [username]);
-
-  const fetchUserInfo = useCallback(async (user: string) => {
-    try {
-      const response = await fetch(`/auth/user?username=${user}`, {
-        method: "GET",
-        headers: {
-          "Content-Type": "application/json",
-        },
-      });
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      const result = await response.json();
-      if (response.ok) {
-        setUserEmail(result.email);
-        setSelectedColor(result.color);
-        setWalletAddress(result.walletAddress || '');
-        setSentTokens(result.sentTokens || 0);
-      } else {
-        alert(result.error || "Failed to fetch user info");
-      }
-    } catch (error) {
-      console.error("Failed to fetch user info:", error);
-    }
-  }, []);
-
-  const fetchTopMiners = useCallback(async () => {
-    try {
-      const response = await fetch(`${API_BASE}/top-miners`);
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      const data: Miner[] = await response.json();
-      setTopMiners(data);
-    } catch (error) {
-      console.error("Failed to fetch top miners data:", error);
-    }
-  }, []);
+  }, [username, setBlockData, setTokenBalance]);
 
   useEffect(() => {
     fetchGrid();
-    fetchUserInfo(username);
-    if (showTopMiners) fetchTopMiners();
-  }, [fetchGrid, fetchUserInfo, fetchTopMiners, username, showTopMiners]);
+  }, [fetchGrid]);
 
   // Also update tokenBalance when blockData changes
   useEffect(() => {
     setTokenBalance(blockData.filter((block) => block.dugBy === username).length);
   }, [blockData, username, setTokenBalance]);
 
-  const handleClick = async (index: number) => {
+  useEffect(() => {
+    // Fetch colors of all users in grid
+    const uniqueUsers = Array.from(new Set(blockData.filter(b => b.dugBy).map(b => b.dugBy)));
+    Promise.all(uniqueUsers.map(async (u) => {
+      const res = await fetch(`/auth/user?username=${u}`);
+      const data = await res.json();
+      return [u, data.color];
+    })).then(results => {
+      const colorMap: { [username: string]: string } = {};
+      results.forEach(([u, color]) => { colorMap[u] = color; });
+      setUserColors(colorMap);
+    });
+  }, [blockData]);
+
+  const handleBlockClick = (index: number) => {
+    setSelectedBlockIndex(index);
+    setShowBlockModal(true);
+  };
+
+  const handleDigBlock = async (index: number) => {
     if (blockStates[index] !== "idle" || isMining) return;
 
+    setShowBlockModal(false); // Close modal first
     setIsMining(true);
     const newStates = [...blockStates];
     newStates[index] = "digging";
@@ -194,8 +285,7 @@ const Grid: React.FC<Props> = ({ username, userColor, showSettings, setShowSetti
         setBlockStates(newStates);
         await fetchGrid(); // Hata durumunda grid yenile
       } else {
-        await fetchGrid(); // Başarılı kazı sonrası da grid yenile
-        await fetchUserInfo(username);
+        await fetchGrid(); // Refresh grid after successful mining
       }
     } catch (error) {
       console.error("Failed to save digging:", error);
@@ -208,213 +298,172 @@ const Grid: React.FC<Props> = ({ username, userColor, showSettings, setShowSetti
     }
   };
 
-  const handleChangePassword = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (newPassword !== confirmPassword) {
-      alert("New passwords do not match");
-      return;
-    }
-    if (newPassword.length < 8) {
-      alert("New password must be at least 8 characters");
-      return;
-    }
 
-    try {
-      const response = await fetch(`/auth/change-password`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          username,
-          currentPassword,
-          newPassword,
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      const result = await response.json();
-      if (!response.ok) {
-        alert(result.error || "Password change failed");
-        return;
-      }
-
-      alert("Password changed successfully");
-      setCurrentPassword("");
-      setNewPassword("");
-      setConfirmPassword("");
-    } catch (error: any) {
-      alert("Password change error: " + error.message);
-    }
-  };
-
-  const handleUpdateColor = async () => {
-    if (!selectedColor) {
-      alert("Please select a color");
-      return;
-    }
-
-    try {
-      const response = await fetch(`/auth/update-color`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          username,
-          color: selectedColor,
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      const result = await response.json();
-      if (!response.ok) {
-        alert(result.error || "Color update failed");
-        return;
-      }
-
-      alert("Color updated successfully");
-      window.location.reload();
-    } catch (error: any) {
-      alert("Color update error: " + error.message);
-    }
-  };
-
-  const handleUpdateWallet = async () => {
-    if (!walletAddress) {
-      alert("Please enter a wallet address");
-      return;
-    }
-
-    try {
-      const response = await fetch(`/auth/update-wallet`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          username,
-          walletAddress,
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      const result = await response.json();
-      if (!response.ok) {
-        alert(result.error || "Wallet address update failed");
-        return;
-      }
-
-      alert(result.message);
-      await fetchGrid();
-      await fetchUserInfo(username);
-    } catch (error: any) {
-      alert("Wallet address update error: " + error.message);
-    }
-  };
-
-  const handleUpdateUsername = async () => {
-    if (!newUsername || newUsername.length < 3) {
-      alert("New username must be at least 3 characters");
-      return;
-    }
-
-    try {
-      const response = await fetch(`/api/update-username`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          currentUsername: username,
-          newUsername,
-        }),
-      });
-
-      if (!response.ok) {
-        const text = await response.text();
-        console.error("Username update failed, response:", text);
-        throw new Error(`HTTP error! status: ${response.status}, response: ${text}`);
-      }
-      const result = await response.json();
-      setUsername(result.newUsername);
-      localStorage.setItem("username", result.newUsername);
-      localStorage.removeItem(`color_${username}`);
-      localStorage.setItem(`color_${result.newUsername}`, userColor || '');
-      await fetchGrid();
-      await fetchUserInfo(result.newUsername);
-      alert("Username updated successfully");
-      setNewUsername("");
-    } catch (error: any) {
-      console.error("Username update error:", error);
-      alert(`Username update error: ${error.message}`);
-    }
-  };
-
-  // Mobile detection function
-  const isMobile = () => window.innerWidth <= 800;
-
-  const showTooltip = (index: number) => {
-    setActiveTooltip(index);
-    if (tooltipTimeout.current) clearTimeout(tooltipTimeout.current);
-    tooltipTimeout.current = setTimeout(() => {
-      setActiveTooltip(null);
-    }, 1500);
-  };
-
-  useEffect(() => {
-    return () => {
-      if (tooltipTimeout.current) clearTimeout(tooltipTimeout.current);
-    };
-  }, []);
-
-  const handleBlockClick = (index: number) => {
-    if (isMobile()) {
-      showTooltip(index);
-    }
-    handleClick(index);
-  };
+  const selectedBlock = selectedBlockIndex !== null ? blockData[selectedBlockIndex] : null;
+  const selectedBlockState = selectedBlockIndex !== null ? blockStates[selectedBlockIndex] : null;
+  const isOwner = selectedBlock?.dugBy === username;
+  const isEmpty = selectedBlockState === "idle";
 
   return (
     <>
-      {/* Remove all settings-modal and top-miners-modal rendering and related state/logic from this file. */}
-
-      <div
-        className="grid-container"
-        style={{
-          display: "grid",
-          gridTemplateColumns: `repeat(${BLOCKS_PER_ROW}, 40px)`,
-          gridTemplateRows: `repeat(${Math.floor(blockData.length / BLOCKS_PER_ROW) || 1}, 40px)`,
-          justifyContent: "center",
-        }}
-      >
+      <div style={{
+        width: '100%',
+        display: 'flex',
+        justifyContent: 'center',
+        alignItems: 'center',
+        padding: '0 env(safe-area-inset-right) 0 env(safe-area-inset-left)'
+      }}>
+        <div className="grid-container" style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(10, 1fr)',
+          gap: '1px',
+          width: '100%',
+          maxWidth: '400px',
+          margin: '0 auto',
+          padding: '1px',
+          boxSizing: 'border-box'
+        }}>
         {blockStates.map((state, index) => {
           const block = blockData[index];
-          const bgColor = state === "dug" && block?.color ? block.color : "transparent";
+          const isUserBlock = block?.dugBy === username;
+          const blockColor = block?.dugBy && userColors[block.dugBy] ? userColors[block.dugBy] : "transparent";
+          const bgColor = state === "dug" ? blockColor : "transparent";
           const visualContent = state === "digging" ? "⏳" : "";
           return (
             <div
               key={index}
-              className={`grid-block ${state}`}
+              className={`grid-block ${state}${isUserBlock ? " my-block" : ""}`}
               title={
                 state === "dug"
                   ? `Block #${block?.index} - Dug by: ${block?.dugBy || "Unknown"}`
                   : `Block #${block?.index}`
               }
-              style={{ backgroundColor: bgColor }}
+              style={{
+                backgroundColor: bgColor,
+                width: '100%',
+                height: '100%',
+                aspectRatio: '1',
+                minWidth: 0,
+                minHeight: 0
+              }}
               onClick={() => handleBlockClick(index)}
             >
               {visualContent}
             </div>
           );
         })}
+        </div>
       </div>
+
+      {/* Block Info Modal - Rendered via Portal to body */}
+      {showBlockModal && selectedBlock && selectedBlockIndex !== null && createPortal(
+        <div 
+          className="block-modal-overlay" 
+          data-modal="block-info"
+          data-safari={isSafari ? "true" : "false"}
+          onClick={() => setShowBlockModal(false)}
+          style={{
+            position: 'fixed',
+            top: '0',
+            left: '0',
+            bottom: '0',
+            right: '0',
+            zIndex: 2147483647,
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'center',
+            backgroundColor: 'rgba(0, 0, 0, 0.7)',
+            transform: 'none',
+            transformOrigin: '0 0',
+            zoom: 1,
+            WebkitTransform: 'none',
+            MozTransform: 'none',
+            msTransform: 'none',
+          }}
+        >
+          <div 
+            className="block-modal-content" 
+            data-modal-content="block-info"
+            data-safari={isSafari ? "true" : "false"}
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              backgroundColor: 'white',
+              padding: '20px',
+              borderRadius: '12px',
+              boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)',
+              textAlign: 'center',
+              width: getModalWidth(),
+              maxWidth: getModalWidth(),
+              minWidth: getModalWidth(),
+              height: 'auto',
+              maxHeight: '400px',
+              position: 'relative',
+              transform: 'none',
+              transformOrigin: 'center center',
+              zoom: 1,
+              fontSize: '14px',
+              WebkitTransform: 'none',
+              MozTransform: 'none',
+              msTransform: 'none',
+              margin: '0',
+              border: 'none',
+              outline: 'none',
+            }}
+          >
+            <h3 style={{ margin: '0 0 16px 0', color: '#333', fontSize: '20px' }}>
+              Block #{selectedBlock.index}
+            </h3>
+            {isEmpty ? (
+              <p style={{ margin: '8px 0 20px 0', color: '#666', fontSize: '16px' }}>Empty Block</p>
+            ) : isOwner ? (
+              <p style={{ margin: '8px 0 20px 0', color: '#666', fontSize: '16px' }}>Owner: You</p>
+            ) : (
+              <p style={{ margin: '8px 0 20px 0', color: '#666', fontSize: '16px' }}>Owner: {selectedBlock.dugBy}</p>
+            )}
+            
+            <div style={{ display: 'flex', gap: '12px', justifyContent: 'center', flexWrap: 'wrap' }}>
+              {isEmpty && (
+                <button 
+                  className="block-modal-button dig-button" 
+                  onClick={() => handleDigBlock(selectedBlockIndex)}
+                  disabled={isMining}
+                  style={{
+                    padding: '10px 20px',
+                    border: 'none',
+                    borderRadius: '6px',
+                    fontSize: '14px',
+                    fontWeight: '600',
+                    cursor: 'pointer',
+                    backgroundColor: '#4CAF50',
+                    color: 'white',
+                    minWidth: '80px',
+                  }}
+                >
+                  {isMining ? "Mining..." : "Dig"}
+                </button>
+              )}
+              <button 
+                className="block-modal-button close-button" 
+                onClick={() => setShowBlockModal(false)}
+                style={{
+                  padding: '10px 20px',
+                  border: 'none',
+                  borderRadius: '6px',
+                  fontSize: '14px',
+                  fontWeight: '600',
+                  cursor: 'pointer',
+                  backgroundColor: '#9E9E9E',
+                  color: 'white',
+                  minWidth: '80px',
+                }}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
     </>
   );
 };

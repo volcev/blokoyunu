@@ -1,66 +1,35 @@
 const express = require('express');
 const fs = require('fs');
-const path = require('path');
 const cors = require('cors');
-const axios = require('axios');
 const { Connection, PublicKey, Keypair, clusterApiUrl, Transaction, SystemProgram } = require('@solana/web3.js');
 const { getOrCreateAssociatedTokenAccount, createTransferInstruction } = require('@solana/spl-token');
 const { Program, AnchorProvider, Wallet, BN } = require('@coral-xyz/anchor');
 const bcrypt = require('bcrypt');
-const { readSessions, writeSessions } = require('./auth');
+
+// Import blockchain writer - DISABLED due to _bn error
+// const {
+//   updateMinerOnBlockchain,
+//   updateThetOnBlockchain,
+//   syncAllMinersToBlockchain,
+//   syncThetOwnersToBlockchain,
+//   isBlockchainEnabled
+// } = require('./blockchain_writer');
+
+// Temporary disabled functions
+const updateMinerOnBlockchain = () => Promise.resolve(false);
+const updateThetOnBlockchain = () => Promise.resolve(false);
+const syncAllMinersToBlockchain = () => Promise.resolve(false);
+const syncThetOwnersToBlockchain = () => Promise.resolve(false);
+const isBlockchainEnabled = () => false;
+
+// Session store (memory-based, cleared on process restart)
+const sessions = {};
+function generateSessionToken() {
+  return Math.random().toString(36).substring(2) + Date.now().toString(36);
+}
 
 const app = express();
-const PORT = 3001;
-
-// Session management (now persistent via auth.js)
-const DB_FILE = './db.json';
-
-// Helper function to validate session via auth server
-async function validateSession(sessionToken) {
-  try {
-    const sessions = readSessions();
-    if (sessions[sessionToken]) {
-      return sessions[sessionToken].username;
-    }
-    return null;
-  } catch (error) {
-    console.error('Session validation error:', error);
-    return null;
-  }
-}
-
-
-
-function getNeighbors(index, totalBlocks, columnCount) {
-  const neighbors = [];
-  const col = index % columnCount;
-
-  // Top
-  if (index >= columnCount) {
-    neighbors.push(index - columnCount);
-  }
-
-  // Bottom
-  const bottomNeighbor = index + columnCount;
-  if (bottomNeighbor < totalBlocks) {
-    neighbors.push(bottomNeighbor);
-  }
-
-  // Left
-  if (col > 0) {
-    neighbors.push(index - 1);
-  }
-
-  // Right
-  if (col < columnCount - 1) {
-    const rightNeighbor = index + 1;
-    if (rightNeighbor < totalBlocks) {
-        neighbors.push(rightNeighbor);
-    }
-  }
-
-  return neighbors;
-}
+const PORT = process.env.PORT || 3001;
 
 const connection = new Connection(clusterApiUrl('devnet'), 'confirmed');
 const TOKEN_PROGRAM_ID = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
@@ -77,23 +46,209 @@ let gameStatsPDA = null;
 // Initialize blockchain stats (safely)
 async function initializeBlockchainStats() {
   try {
-    console.log('Attempting to initialize blockchain stats connection...');
+    console.log('🔗 Attempting to initialize blockchain stats connection...');
     
     const programId = new PublicKey(STATS_PROGRAM_ID);
     const [pda] = PublicKey.findProgramAddressSync(
-      [Buffer.from("game_stats")],
+      [Buffer.from("game_stats_v3")], // Updated to match our deployed program
       programId
     );
     gameStatsPDA = pda;
-    blockchainStatsEnabled = true;
+    // blockchainStatsEnabled = true; // Temporarily disabled to show local data
     
     console.log('✅ Blockchain stats initialized successfully');
+    console.log('📍 Program ID:', STATS_PROGRAM_ID);
     console.log('📍 Game Stats PDA:', gameStatsPDA.toString());
+    
+    // Test blockchain connection
+    await testBlockchainConnection();
   } catch (error) {
     console.log('❌ Blockchain stats initialization failed:', error.message);
     console.log('🔄 Continuing with local stats fallback...');
     blockchainStatsEnabled = false;
   }
+}
+
+// Test blockchain connection
+async function testBlockchainConnection() {
+  try {
+    console.log('🧪 Testing blockchain connection...');
+    const accountInfo = await connection.getAccountInfo(gameStatsPDA);
+    if (accountInfo) {
+      console.log('✅ Blockchain account found, data size:', accountInfo.data.length);
+    } else {
+      console.log('⚠️ Blockchain account not found (not initialized yet)');
+    }
+  } catch (error) {
+    console.log('❌ Blockchain connection test failed:', error.message);
+  }
+}
+
+// Parse blockchain account data
+function parseBlockchainData(data) {
+  try {
+    console.log('🔍 Parsing blockchain data...');
+    
+    // Skip the 8-byte discriminator that Anchor adds
+    let offset = 8;
+    
+    // Parse basic stats (u64 values are 8 bytes each)
+    const totalBlocks = readU64(data, offset);
+    offset += 8;
+    
+    const minedBlocks = readU64(data, offset);
+    offset += 8;
+    
+    const totalMiners = readU32(data, offset);
+    offset += 4;
+    
+    // Parse miners vector
+    const minersLength = readU32(data, offset);
+    offset += 4;
+    
+    const miners = [];
+    for (let i = 0; i < Math.min(minersLength, 10); i++) {
+      try {
+        const miner = parseMinerData(data, offset);
+        miners.push(miner.data);
+        offset = miner.newOffset;
+      } catch (error) {
+        console.log(`⚠️ Failed to parse miner ${i}:`, error.message);
+        break;
+      }
+    }
+    
+    // Parse THET owners vector (similar structure)
+    let thetOwners = [];
+    if (offset < data.length - 20) { // Ensure we have enough data
+      try {
+        const ownersLength = readU32(data, offset);
+        offset += 4;
+        
+        for (let i = 0; i < Math.min(ownersLength, 10) && offset < data.length - 20; i++) {
+          try {
+            const owner = parseThetOwnerData(data, offset);
+            thetOwners.push(owner.data);
+            offset = owner.newOffset;
+          } catch (error) {
+            console.log(`⚠️ Failed to parse THET owner ${i}:`, error.message);
+            break;
+          }
+        }
+      } catch (error) {
+        console.log('⚠️ Failed to parse THET owners section:', error.message);
+      }
+    }
+    
+    // Parse last updated timestamp
+    let lastUpdated = Date.now();
+    if (offset <= data.length - 8) {
+      try {
+        lastUpdated = readI64(data, offset) * 1000; // Convert to milliseconds
+      } catch (error) {
+        console.log('⚠️ Failed to parse last updated timestamp:', error.message);
+      }
+    }
+    
+    const result = {
+      totalBlocks: Number(totalBlocks),
+      minedBlocks: Number(minedBlocks),
+      emptyBlocks: Number(totalBlocks - minedBlocks),
+      totalMiners,
+      topMiners: miners.slice(0, 3), // Top 3 miners
+      topThetOwners: thetOwners.slice(0, 3), // Top 3 THET owners
+      lastUpdated: new Date(lastUpdated).toISOString(),
+      totalBlocksMined: Number(minedBlocks), // Legacy compatibility
+      gridExpansions: Math.floor(Number(totalBlocks) / 100) - 1
+    };
+    
+    console.log('✅ Blockchain data parsed successfully:', {
+      totalBlocks: result.totalBlocks,
+      minedBlocks: result.minedBlocks,
+      minersCount: miners.length,
+      thetOwnersCount: thetOwners.length
+    });
+    
+    return result;
+  } catch (error) {
+    console.error('❌ Failed to parse blockchain data:', error);
+    return null;
+  }
+}
+
+// Helper functions to read data types
+function readU64(buffer, offset) {
+  return buffer.readBigUInt64LE(offset);
+}
+
+function readU32(buffer, offset) {
+  return buffer.readUInt32LE(offset);
+}
+
+function readI64(buffer, offset) {
+  return buffer.readBigInt64LE(offset);
+}
+
+function parseMinerData(data, offset) {
+  // Parse string length (4 bytes)
+  const nameLength = readU32(data, offset);
+  offset += 4;
+  
+  // Parse string data
+  const name = data.subarray(offset, offset + nameLength).toString('utf8');
+  offset += nameLength;
+  
+  // Parse block count (8 bytes)
+  const blockCount = readU64(data, offset);
+  offset += 8;
+  
+  // Parse color string length (4 bytes)
+  const colorLength = readU32(data, offset);
+  offset += 4;
+  
+  // Parse color string
+  const color = data.subarray(offset, offset + colorLength).toString('utf8');
+  offset += colorLength;
+  
+  return {
+    data: {
+      name,
+      blockCount: Number(blockCount),
+      color
+    },
+    newOffset: offset
+  };
+}
+
+function parseThetOwnerData(data, offset) {
+  // Parse string length (4 bytes)
+  const nameLength = readU32(data, offset);
+  offset += 4;
+  
+  // Parse string data
+  const name = data.subarray(offset, offset + nameLength).toString('utf8');
+  offset += nameLength;
+  
+  // Parse THET earned (8 bytes)
+  const thetEarned = readU64(data, offset);
+  offset += 8;
+  
+  // Parse color string length (4 bytes)
+  const colorLength = readU32(data, offset);
+  offset += 4;
+  
+  // Parse color string
+  const color = data.subarray(offset, offset + colorLength).toString('utf8');
+  offset += colorLength;
+  
+  return {
+    data: {
+      name,
+      thetEarned: Number(thetEarned),
+      color
+    },
+    newOffset: offset
+  };
 }
 
 // Initialize on startup
@@ -127,14 +282,70 @@ async function incrementBlocksMinedOnChain(amount = 1) {
 
 async function getOnChainStats(username = null) {
   if (!blockchainStatsEnabled) {
+    console.log('⚠️ Blockchain stats disabled, returning null');
     return null;
   }
   
   try {
-    // Try to fetch from the real blockchain account
-    console.log('📊 Attempting to fetch detailed blockchain stats...');
+    // Try to fetch from the real Solana blockchain
+    console.log('📊 Attempting to fetch real blockchain stats...');
     console.log(`🔗 PDA: ${gameStatsPDA.toString()}`);
     
+    const accountInfo = await connection.getAccountInfo(gameStatsPDA);
+    console.log('🔍 Account info:', accountInfo ? 'Found' : 'Not found');
+    
+    if (accountInfo && accountInfo.data) {
+      console.log('📦 Account data length:', accountInfo.data.length);
+      // Parse blockchain data
+      const blockchainStats = parseBlockchainData(accountInfo.data);
+      console.log('🔍 Parse result:', blockchainStats ? 'Success' : 'Failed');
+      
+      if (blockchainStats) {
+        console.log('✅ Successfully fetched from blockchain');
+        
+        // Add current user stats if username provided
+        let currentUserStats = null;
+        if (username) {
+          const data = readDB();
+          const user = data.users.find(u => u.username === username);
+          const playerCounts = {};
+          data.grid.forEach(block => {
+            if (block.dugBy) {
+              playerCounts[block.dugBy] = (playerCounts[block.dugBy] || 0) + 1;
+            }
+          });
+          const userBlockCount = playerCounts[username] || 0;
+          
+          // Calculate remaining mining rights for today
+          const today = new Date().toISOString().slice(0, 10);
+          let remainingMines = 12; // Default daily limit
+          
+          if (user && user.lastDigDate === today) {
+            remainingMines = Math.max(0, 12 - (user.dailyDigCount || 0));
+          }
+          
+          currentUserStats = {
+            username,
+            totalBlocks: userBlockCount,
+            remainingMines,
+            color: user ? user.color : "#888",
+            thetEarned: user ? (user.sentTokens || 0) : 0
+          };
+        }
+        
+        return {
+          ...blockchainStats,
+          currentUser: currentUserStats,
+          programId: STATS_PROGRAM_ID,
+          gameStatsPDA: gameStatsPDA.toString(),
+          source: "Solana Blockchain (Devnet)"
+        };
+      }
+    }
+    
+    console.log('⚠️ Blockchain data not available, falling back to local calculation');
+    
+    // Fallback to local calculation
     const data = readDB();
     
     // 1. Total number of blocks in grid
@@ -231,6 +442,8 @@ async function getOnChainStats(username = null) {
 app.use(cors());
 app.use(express.json());
 
+const DB_FILE = './db.json';
+
 function readDB() {
   try {
     return JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
@@ -273,13 +486,10 @@ app.get('/grid', (req, res) => {
 
 app.patch('/grid/:index', async (req, res) => {
   const sessionToken = req.headers['x-session-token'];
-  if (!sessionToken) {
+  if (!sessionToken || !sessions[sessionToken]) {
     return res.status(401).json({ error: 'Unauthorized: Invalid or missing session token' });
   }
-  const username = await validateSession(sessionToken);
-  if (!username) {
-    return res.status(401).json({ error: 'Unauthorized: Invalid session token' });
-  }
+  const username = sessions[sessionToken].username;
 
   const index = parseInt(req.params.index);
   const { visual } = req.body;
@@ -307,7 +517,7 @@ app.patch('/grid/:index', async (req, res) => {
     try {
       const gridb = readGridB(data.grid.length);
       const castleCount = gridb.filter(b => 
-        b.owner === username && b.defense >= 10
+        b.owner === username && b.defense === 10
       ).length;
       
       // Auto-mine blocks equal to castle count
@@ -336,6 +546,21 @@ app.patch('/grid/:index', async (req, res) => {
   block.dugBy = username;
   block.visual = visual || null;
   writeDB(data);
+
+  // 🔗 UPDATE BLOCKCHAIN: Sync miner after new block mined
+  console.log(`⛏️ ${username} mined block ${blockIndex}, syncing to blockchain...`);
+  
+  // Calculate current user's block count
+  const userBlockCount = data.grid.filter(b => b.dugBy === username).length;
+  
+  // Update this specific miner on blockchain (non-blocking)
+  updateMinerOnBlockchain(username, user.color || '#888888', userBlockCount, data.grid.length)
+    .then(success => {
+      if (success) {
+        console.log(`✅ ${username} synced to blockchain: ${userBlockCount} blocks`);
+      }
+    })
+    .catch(err => console.log(`❌ Blockchain miner sync failed: ${err.message}`));
 
   // Update on-chain stats (non-blocking)
   incrementBlocksMinedOnChain(1).catch(err => {
@@ -418,24 +643,87 @@ app.post('/stats/initialize', async (req, res) => {
 app.get('/stats/blockchain', async (req, res) => {
   try {
     const username = req.query.username; // Username parametresi al
+    console.log('🌐 API /stats/blockchain called with username:', username);
     const onChainStats = await getOnChainStats(username);
+    console.log('📊 getOnChainStats result:', onChainStats ? 'Got data' : 'No data');
     if (onChainStats) {
+      console.log('✅ Returning blockchain data');
       res.json({
         success: true,
         stats: onChainStats,
         source: 'blockchain'
       });
     } else {
+      console.log('⚠️ Falling back to local data');
       // Fallback to local stats if blockchain is unavailable
       const data = readDB();
+      
+      // Calculate detailed local stats
+      const totalBlocks = data.grid.length;
+      const minedBlocks = data.grid.filter(b => b.dugBy).length;
+      
+      // Top 3 users with most blocks
+      const playerCounts = {};
+      data.grid.forEach(block => {
+        if (block.dugBy) {
+          playerCounts[block.dugBy] = (playerCounts[block.dugBy] || 0) + 1;
+        }
+      });
+      
+      const topMiners = Object.entries(playerCounts)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 3)
+        .map(([name, count]) => {
+          const user = data.users.find(u => u.username === name);
+          return {
+            name,
+            blockCount: count,
+            color: user ? user.color : "#888"
+          };
+        });
+
+      // Top 3 THET owners
+      const topThetOwners = data.users
+        .filter(user => user.sentTokens && user.sentTokens > 0)
+        .sort((a, b) => (b.sentTokens || 0) - (a.sentTokens || 0))
+        .slice(0, 3)
+        .map(user => ({
+          name: user.username,
+          thetEarned: user.sentTokens || 0,
+          color: user.color || "#888"
+        }));
+      
+      // Current user stats if username provided
+      let currentUser = null;
+      if (username) {
+        const user = data.users.find(u => u.username === username);
+        const userBlockCount = playerCounts[username] || 0;
+        
+        const today = new Date().toISOString().slice(0, 10);
+        let remainingMines = 12;
+        
+        if (user && user.lastDigDate === today) {
+          remainingMines = Math.max(0, 12 - (user.dailyDigCount || 0));
+        }
+        
+        currentUser = {
+          username,
+          totalBlocks: userBlockCount,
+          remainingMines,
+          color: user ? user.color : "#888",
+          thetEarned: user ? (user.sentTokens || 0) : 0
+        };
+      }
+      
       const localStats = {
-        totalBlocks: data.grid.length,
-        minedBlocks: data.grid.filter(b => b.dugBy).length,
-        emptyBlocks: data.grid.length - data.grid.filter(b => b.dugBy).length,
-        topMiners: [],
-        currentUser: null,
-        totalBlocksMined: data.grid.filter(b => b.dugBy).length,
-        gridExpansions: Math.floor(data.grid.length / 100) - 1
+        totalBlocks,
+        minedBlocks,
+        emptyBlocks: totalBlocks - minedBlocks,
+        topMiners,
+        topThetOwners,
+        currentUser,
+        totalBlocksMined: minedBlocks,
+        gridExpansions: Math.floor(totalBlocks / 100) - 1
       };
       res.json({
         success: true,
@@ -450,25 +738,15 @@ app.get('/stats/blockchain', async (req, res) => {
 });
 
 app.post('/reset-tokens', async (req, res) => {
-  const { username, walletAddress } = req.body;
-  if (!walletAddress) {
-    return res.status(400).json({ error: 'Invalid wallet address' });
+  const { username, walletAddress, blockCount } = req.body;
+  if (!walletAddress || !blockCount || blockCount <= 0) {
+    return res.status(400).json({ error: 'Invalid wallet address or block count' });
   }
   const data = readDB();
   const user = data.users.find(user => user.username === username);
   if (!user) {
     return res.status(400).json({ error: 'User not found' });
   }
-  
-  // Calculate warzone blocks (used blocks)
-  const gridBData = readGridB(data.grid.length);
-  const warzoneBlocks = gridBData.filter(block => block.owner === username);
-  const usedBlockCount = warzoneBlocks.reduce((sum, b) => sum + (b.defense || 1), 0);
-  
-  if (usedBlockCount <= 0) {
-    return res.status(400).json({ error: 'No warzone blocks to reset' });
-  }
-  
   try {
     const receiverPubkey = new PublicKey(walletAddress);
     const senderTokenAccount = await getOrCreateAssociatedTokenAccount(connection, senderKeypair, THE_TOKEN_MINT, senderKeypair.publicKey);
@@ -478,13 +756,23 @@ app.post('/reset-tokens', async (req, res) => {
         senderTokenAccount.address,
         receiverTokenAccount.address,
         senderKeypair.publicKey,
-        usedBlockCount * 1000000000
+        blockCount * 1000000000
       )
     );
     const signature = await connection.sendTransaction(transaction, [senderKeypair]);
     await connection.confirmTransaction(signature, 'confirmed');
     
-    // Reset warzone blocks
+    // Reset the blocks mined by the user from BOTH grids
+    data.grid.forEach(block => {
+      if (block.dugBy === username) {
+        block.dugBy = null;
+        block.color = null;
+        block.visual = null;
+      }
+    });
+
+    // ALSO reset blocks from warzone (gridb)
+    const gridBData = readGridB(data.grid.length);
     gridBData.forEach(block => {
       if (block.owner === username) {
         block.owner = null;
@@ -495,21 +783,30 @@ app.post('/reset-tokens', async (req, res) => {
       }
     });
     writeGridB(gridBData);
-    
-    // Reset same amount of blocks from digzone (LIFO - last mined first)
-    let blocksToRemove = usedBlockCount;
-    for (let i = data.grid.length - 1; i >= 0 && blocksToRemove > 0; i--) {
-      if (data.grid[i].dugBy === username) {
-        data.grid[i].dugBy = null;
-        data.grid[i].color = null;
-        data.grid[i].visual = null;
-        blocksToRemove--;
-      }
-    }
 
-    user.sentTokens = (user.sentTokens || 0) + usedBlockCount;
+    user.sentTokens = (user.sentTokens || 0) + blockCount;
     writeDB(data);
-    res.json({ success: true, sentTokens: user.sentTokens, rewardSignature: signature, resetCount: usedBlockCount });
+    
+    // 🔗 UPDATE BLOCKCHAIN: Sync THET earnings after reset
+    console.log(`🔄 Syncing ${username} THET to blockchain after reset...`);
+    updateThetOnBlockchain(username, user.color || '#888888', user.sentTokens)
+      .then(success => {
+        if (success) {
+          console.log(`✅ ${username} THET synced to blockchain: ${user.sentTokens} THET`);
+        }
+      })
+      .catch(err => console.log(`❌ Blockchain THET sync failed: ${err.message}`));
+    
+    // Also sync all miners since grid changed
+    syncAllMinersToBlockchain(data)
+      .then(success => {
+        if (success) {
+          console.log(`✅ All miners synced to blockchain after ${username} reset`);
+        }
+      })
+      .catch(err => console.log(`❌ Blockchain miners sync failed: ${err.message}`));
+    
+    res.json({ success: true, sentTokens: user.sentTokens, rewardSignature: signature });
   } catch (error) {
     console.error('Reward transfer error:', error);
     res.status(400).json({ error: error.message });
@@ -564,15 +861,6 @@ app.post('/api/update-username', async (req, res) => {
       }
       return block;
     });
-
-    // GridB'deki owner alanlarını da güncelle (Warzone)
-    const totalBlocks = data.grid.length;
-    const gridBData = readGridB(totalBlocks);
-    const updatedGridB = gridBData.map(block => 
-      block.owner === currentUsername ? { ...block, owner: newUsername } : block
-    );
-    writeGridB(updatedGridB);
-
     writeDB(data);
     res.json({ success: true, newUsername });
   } catch (error) {
@@ -594,86 +882,33 @@ app.get('/auth/user', (req, res) => {
   res.json(user);
 });
 
-// Proxy login requests to auth server
 app.post('/login', async (req, res) => {
-  try {
-    const response = await axios.post('http://localhost:3002/login', req.body);
-    
-    // If login successful, write session to main server's sessions.json
-    if (response.data.success && response.data.sessionToken && response.data.username) {
-      const sessions = readSessions();
-      sessions[response.data.sessionToken] = { 
-        username: response.data.username, 
-        createdAt: Date.now() 
-      };
-      writeSessions(sessions);
-      console.log('✅ Session written to main server:', response.data.sessionToken);
-    }
-    
-    res.json(response.data);
-  } catch (error) {
-    if (error.response) {
-      res.status(error.response.status).json(error.response.data);
-    } else {
-      res.status(500).json({ error: 'Auth server connection failed' });
-    }
+  const { email, password } = req.body;
+  if (!email || !password) {
+    return res.status(400).json({ error: 'Email and password are required' });
   }
-});
 
-// Proxy signup requests to auth server
-app.post('/signup', async (req, res) => {
-  try {
-    const response = await axios.post('http://localhost:3002/signup', req.body);
-    res.json(response.data);
-  } catch (error) {
-    if (error.response) {
-      res.status(error.response.status).json(error.response.data);
-    } else {
-      res.status(500).json({ error: 'Auth server connection failed' });
-    }
-  }
-});
+  const data = readDB();
+  const user = data.users.find(user => user.email === email);
 
-// Proxy email verification to auth server  
-app.get('/verify-email', async (req, res) => {
-  try {
-    const response = await axios.get('http://localhost:3002/verify-email', { params: req.query });
-    res.json(response.data);
-  } catch (error) {
-    if (error.response) {
-      res.status(error.response.status).json(error.response.data);
-    } else {
-      res.status(500).json({ error: 'Auth server connection failed' });
-    }
+  if (!user) {
+    return res.status(400).json({ error: 'User not found' });
   }
-});
 
-// Proxy forgot-password requests to auth server
-app.post('/forgot-password', async (req, res) => {
-  try {
-    const response = await axios.post('http://localhost:3002/forgot-password', req.body);
-    res.json(response.data);
-  } catch (error) {
-    if (error.response) {
-      res.status(error.response.status).json(error.response.data);
-    } else {
-      res.status(500).json({ error: 'Auth server connection failed' });
-    }
+  if (!user.isVerified) {
+    return res.status(400).json({ error: 'Email not verified' });
   }
-});
 
-// Proxy reset-password requests to auth server
-app.post('/reset-password', async (req, res) => {
-  try {
-    const response = await axios.post('http://localhost:3002/reset-password', req.body);
-    res.json(response.data);
-  } catch (error) {
-    if (error.response) {
-      res.status(error.response.status).json(error.response.data);
-    } else {
-      res.status(500).json({ error: 'Auth server connection failed' });
-    }
+  const isPasswordValid = await bcrypt.compare(password, user.passwordHash);
+  if (!isPasswordValid) {
+    return res.status(400).json({ error: 'Invalid password' });
   }
+
+  // Session token generate and store
+  const sessionToken = generateSessionToken();
+  sessions[sessionToken] = { username: user.username, createdAt: Date.now() };
+
+  res.json({ success: true, username: user.username, color: user.color, walletAddress: user.walletAddress, sentTokens: user.sentTokens, sessionToken });
 });
 
 // GET /gridb: Return the current state of GridB
@@ -684,16 +919,13 @@ app.get('/gridb', (req, res) => {
 });
 
 // PATCH /gridb/:index: User adds the next of their own blocks
-app.patch('/gridb/:index', async (req, res) => {
+app.patch('/gridb/:index', (req, res) => {
   try {
     const sessionToken = req.headers['x-session-token'];
-    if (!sessionToken) {
+    if (!sessionToken || !sessions[sessionToken]) {
       return res.status(401).json({ error: 'Unauthorized: Invalid or missing session token' });
     }
-    const username = await validateSession(sessionToken);
-    if (!username) {
-      return res.status(401).json({ error: 'Unauthorized: Invalid session token' });
-    }
+    const username = sessions[sessionToken].username;
     const blockIndex = parseInt(req.params.index);
     const db = readDB();
     const totalBlocks = db.grid.length;
@@ -711,25 +943,16 @@ app.patch('/gridb/:index', async (req, res) => {
     const totalDefenseUsed = userBlocksInGridB.reduce((sum, b) => sum + (b.defense || 1), 0);
     const userStock = userBlocks.length - totalDefenseUsed;
 
-    // If user has no blocks in gridb, they can place first block anywhere
+    // If user has no blocks in gridb and no empty blocks, they can place first block anywhere
     const userHasNoBlocksInGridB = userBlocksInGridB.length === 0;
     const emptyBlocks = gridb.filter(b => !b.owner);
-    const isFirstPlacement = userHasNoBlocksInGridB;
+    const isFirstPlacement = userHasNoBlocksInGridB && emptyBlocks.length === 0;
 
     const block = gridb[blockIndex];
     // Clicking empty block or claiming ownerless block
     if (!block.owner) {
       if (userStock <= 0 && !isFirstPlacement) {
         return res.status(400).json({ error: 'No stock left to place a block' });
-      }
-      
-      // ✨ NEW: Neighbor validation for empty block placement (except first placement)
-      if (!isFirstPlacement) {
-        const neighbors = getNeighbors(blockIndex, totalBlocks, 50);
-        const hasNeighbor = neighbors.some(n => gridb[n] && gridb[n].owner === username);
-        if (!hasNeighbor) {
-          return res.status(403).json({ error: 'You must place blocks adjacent to your existing blocks' });
-        }
       }
       
       // No additional cost for claiming - already paid during attack
@@ -754,19 +977,41 @@ app.patch('/gridb/:index', async (req, res) => {
 
     // Clicking someone else's block
     // Neighbor check: user must have at least one neighboring block
-    const neighbors = getNeighbors(blockIndex, totalBlocks, 50);
+    // --- 2D grid neighbor logic ---
+    // Must be calculated same way as frontend
+    const aspectRatio = 16 / 9;
+    let cols = Math.ceil(Math.sqrt(totalBlocks * aspectRatio));
+    let rows = Math.ceil(totalBlocks / cols);
+    while (cols / rows > aspectRatio + 0.01) {
+      cols--;
+      rows = Math.ceil(totalBlocks / cols);
+    }
+    while (cols / rows < aspectRatio - 0.01) {
+      cols++;
+      rows = Math.ceil(totalBlocks / cols);
+    }
+    const getNeighbors = (idx) => {
+      const neighbors = [];
+      const row = Math.floor(idx / cols);
+      const col = idx % cols;
+              if (col > 0) neighbors.push(idx - 1); // left
+      if (col < cols - 1) neighbors.push(idx + 1); // right
+      if (row > 0) neighbors.push(idx - cols); // top
+              if (row < rows - 1 && idx + cols < totalBlocks) neighbors.push(idx + cols); // bottom
+      return neighbors;
+    };
+    const neighbors = getNeighbors(blockIndex);
     const hasNeighbor = neighbors.some(n => gridb[n] && gridb[n].owner === username);
     if (!hasNeighbor && !isFirstPlacement) {
       return res.status(403).json({ error: 'You must have a neighboring block to attack' });
     }
     
-    // Attack mechanics
-    const currentDefense = typeof gridb[blockIndex].defense === 'number' ? gridb[blockIndex].defense : 1;
-    
     // ⚡ CASTLE PROTECTION: Castle attacks forbidden on first placement
-    if (isFirstPlacement && currentDefense >= 10) {
+    if (isFirstPlacement && currentDefense === 10) {
       return res.status(403).json({ error: 'Cannot attack castles on first placement. Attack a neighboring block first.' });
     }
+    // Attack mechanics
+    const currentDefense = typeof gridb[blockIndex].defense === 'number' ? gridb[blockIndex].defense : 1;
     const prevOwner = gridb[blockIndex].owner;
     
     // Each attack costs attacker 1 block
@@ -814,15 +1059,12 @@ app.patch('/gridb/:index', async (req, res) => {
 });
 
 // DELETE /gridb/:index: User removes their own block
-app.delete('/gridb/:index', async (req, res) => {
+app.delete('/gridb/:index', (req, res) => {
   const sessionToken = req.headers['x-session-token'];
-  if (!sessionToken) {
+  if (!sessionToken || !sessions[sessionToken]) {
     return res.status(401).json({ error: 'Unauthorized: Invalid or missing session token' });
   }
-  const username = await validateSession(sessionToken);
-  if (!username) {
-    return res.status(401).json({ error: 'Unauthorized: Invalid session token' });
-  }
+  const username = sessions[sessionToken].username;
   const blockIndex = parseInt(req.params.index);
   const totalBlocks = readDB().grid.length;
   let gridb = readGridB(totalBlocks);
@@ -839,115 +1081,6 @@ app.delete('/gridb/:index', async (req, res) => {
 
     // POST /update-block-color: User updates their block's color
 // This endpoint removed
-
-// POST /api/contact: Handle contact form submissions
-app.post('/api/contact', async (req, res) => {
-  const { name, email, message, username } = req.body;
-  
-  // Check if user is authenticated by session token
-  const sessionToken = req.headers.authorization?.replace('Bearer ', '');
-  if (!sessionToken) {
-    return res.status(401).json({ error: 'Authentication required. Please log in to send a message.' });
-  }
-  
-  // Validate session
-  const isValidSession = await validateSession(sessionToken);
-  if (!isValidSession) {
-    return res.status(401).json({ error: 'Invalid session. Please log in again.' });
-  }
-  
-  if (!name || !email || !message) {
-    return res.status(400).json({ error: 'All fields are required' });
-  }
-  
-  // Validate email format
-  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  if (!emailRegex.test(email)) {
-    return res.status(400).json({ error: 'Invalid email format' });
-  }
-  
-  try {
-    const contactData = {
-      id: Date.now(), // Simple ID based on timestamp
-      timestamp: new Date().toISOString(),
-      name: name.trim(),
-      email: email.trim(),
-      message: message.trim(),
-      username: username || 'Anonymous',
-      ip: req.ip,
-      status: 'new' // new, read, resolved
-    };
-    
-    // Save to contacts.json file
-    const contactsFile = path.join(__dirname, 'contacts.json');
-    let contacts = [];
-    
-    try {
-      if (fs.existsSync(contactsFile)) {
-        const data = fs.readFileSync(contactsFile, 'utf8');
-        contacts = JSON.parse(data);
-      }
-    } catch (err) {
-      console.log('Creating new contacts.json file');
-    }
-    
-    contacts.unshift(contactData); // Add to beginning (newest first)
-    
-    // Keep only last 1000 messages to prevent file getting too large
-    if (contacts.length > 1000) {
-      contacts = contacts.slice(0, 1000);
-    }
-    
-    fs.writeFileSync(contactsFile, JSON.stringify(contacts, null, 2));
-    
-    console.log('📧 New contact message saved:', {
-      id: contactData.id,
-      from: contactData.name,
-      email: contactData.email,
-      timestamp: contactData.timestamp
-    });
-    
-    res.json({ 
-      success: true, 
-      message: 'Your message has been received. We will get back to you soon!' 
-    });
-    
-  } catch (error) {
-    console.error('Contact form error:', error);
-    res.status(500).json({ error: 'Failed to process your message. Please try again.' });
-  }
-});
-
-// GET /api/admin/contacts: View all contact messages (admin only)
-app.get('/api/admin/contacts', async (req, res) => {
-  try {
-    // Check if user is authenticated by session token
-    const sessionToken = req.headers.authorization?.replace('Bearer ', '');
-    if (!sessionToken) {
-      return res.status(401).json({ error: 'Authentication required. Admin access only.' });
-    }
-    
-    // Validate session
-    const isValidSession = await validateSession(sessionToken);
-    if (!isValidSession) {
-      return res.status(401).json({ error: 'Invalid session. Please log in again.' });
-    }
-    
-    const contactsFile = path.join(__dirname, 'contacts.json');
-    
-    if (!fs.existsSync(contactsFile)) {
-      return res.json([]);
-    }
-    
-    const data = fs.readFileSync(contactsFile, 'utf8');
-    const contacts = JSON.parse(data);
-    
-    res.json(contacts);
-  } catch (error) {
-    console.error('Error reading contacts:', error);
-    res.status(500).json({ error: 'Failed to load contacts' });
-  }
-});
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Custom server running at http://0.0.0.0:${PORT}`);

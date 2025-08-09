@@ -6,6 +6,25 @@
   max-width: 400px;
   margin-left: auto;
   margin-right: auto;
+  padding: 20px;
+  box-sizing: border-box;
+  min-height: calc(100vh - 100px); /* Ensure enough height */
+}
+
+/* Desktop form improvements */
+.login-container form {
+  width: 100%;
+  padding-bottom: 20px;
+}
+
+/* Mobile keyboard handling */
+@media (max-width: 768px) {
+  .login-container {
+    margin-top: 20px;
+    padding: 15px;
+    max-width: 100%;
+    width: 100%;
+  }
 }
 
 .form-group {
@@ -37,11 +56,24 @@
   margin-top: 10px;
 }
 
-.button-group {
+.login-button-group {
   display: flex;
   justify-content: center;
   gap: 10px;
-  margin-top: 15px;
+  margin-top: 20px;
+  margin-bottom: 20px;
+  width: 100%;
+}
+
+/* Regular button positioning - directly under form fields */
+.login-container .login-button-group {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 10px;
+  margin-top: 20px;
+  margin-bottom: 20px;
+  width: 100%;
 }
 
 .login-button {
@@ -51,4 +83,81 @@
   border: none;
   border-radius: 8px;
   cursor: pointer;
+  font-size: 16px; /* Prevent zoom on iOS */
+  min-height: 44px; /* Touch target size */
+}
+
+.login-button:hover {
+  background-color: #1976d2;
+}
+
+.forgot-password-link {
+  display: flex;
+  justify-content: center;
+  margin-top: 10px;
+  margin-bottom: 10px;
+}
+
+.link-button {
+  background: none;
+  border: none;
+  color: #2196f3;
+  text-decoration: underline;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 5px;
+}
+
+.link-button:hover {
+  color: #1976d2;
+}
+
+/* Mobile-specific button improvements - ONLY for login component */
+@media (max-width: 768px) {
+  .login-container .login-button-group {
+    margin-top: 20px;
+    margin-bottom: 20px;
+    gap: 15px;
+  }
+  
+  .login-container .login-button {
+    flex: 1;
+    max-width: 140px;
+    font-size: 16px;
+    padding: 12px 20px;
+    min-height: 48px;
+  }
+  
+  .form-group {
+    margin-bottom: 20px; /* More space between fields */
+  }
+  
+  .login-input {
+    font-size: 16px; /* Prevent zoom on iOS */
+    padding: 12px;
+    min-height: 20px;
+  }
+  
+  /* Color picker mobile improvements */
+  .color-picker {
+    gap: 8px;
+    margin-top: 15px;
+  }
+  
+  .color-picker > div {
+    width: 35px !important;
+    height: 35px !important;
+  }
+}
+
+/* Additional mobile viewport fixes */
+@media (max-height: 600px) {
+  .login-container {
+    margin-top: 10px;
+    padding: 10px 15px;
+  }
+  
+  .form-group {
+    margin-bottom: 15px;
+  }
 }

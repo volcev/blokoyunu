@@ -1,6 +1,9 @@
 const webpack = require("webpack");
 
 module.exports = {
+  devServer: {
+    allowedHosts: "all",
+  },
   webpack: {
     configure: (config) => {
       config.resolve.fallback = {

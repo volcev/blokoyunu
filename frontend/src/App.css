@@ -1,3 +1,8 @@
+/* ======================================
+   CLEAN APP.CSS - LAYOUT ONLY
+   ====================================== */
+
+/* Global styles */
 body, html, #root {
   height: 100%;
   margin: 0;
@@ -14,9 +19,14 @@ body, html, #root {
   background: #f7f7fa;
 }
 
+/* ======================================
+   1. TOP BAR (Header)
+   ====================================== */
 .top-bar {
   position: fixed;
-  top: 0; left: 0; width: 100vw;
+  top: 0; 
+  left: 0; 
+  width: 100vw;
   height: 70px;
   background: #fff;
   box-shadow: 0 2px 8px rgba(0,0,0,0.07);
@@ -32,6 +42,26 @@ body, html, #root {
   vertical-align: middle;
 }
 
+.title {
+  font-size: 2rem;
+  font-weight: bold;
+  text-align: center;
+  margin-bottom: 0.5rem;
+  letter-spacing: 1px;
+  color: #222;
+  margin: 0 12px 0 0;
+  flex-shrink: 0;
+}
+
+.welcome-header {
+  font-size: 1.2rem;
+  color: #2196f3;
+  font-weight: 500;
+  margin-left: 12px;
+  white-space: nowrap;
+}
+
+/* Menu button and dropdown */
 .button-container {
   display: flex;
   align-items: center;
@@ -86,43 +116,21 @@ body, html, #root {
   background-color: #f0f0f0;
 }
 
-.content-container {
-  margin-top: 244px; /* top-bar + banner + butonlar + ekstra boşluk + 4px */
-  width: 100vw;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: flex-start;
-  box-sizing: border-box;
+.menu-dropdown button[style*="#ff4d4f"]:hover {
+  background-color: #ff7875 !important;
 }
 
-.title {
-  font-size: 2rem;
-  font-weight: bold;
-  text-align: center;
-  margin-bottom: 0.5rem;
-  letter-spacing: 1px;
-  color: #222;
-  margin: 0 12px 0 0;
-  flex-shrink: 0;
-}
-
-.welcome-header {
-  font-size: 1.2rem;
-  color: #2196f3;
-  font-weight: 500;
-  margin-left: 12px;
-  white-space: nowrap;
-}
-
+/* ======================================
+   2. BANNER AREA
+   ====================================== */
 .banner-placeholder {
   position: fixed;
-  top: 70px; /* .top-bar'ın hemen altında */
+  top: 70px;
   left: 0;
   width: 100vw;
   height: 90px;
-  background: #fff; /* Opak beyaz, top-bar ve button-group ile aynı */
-  border-radius: 0; /* Köşe yuvarlatma kaldırıldı */
+  background: #fff;
+  border-radius: 0;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -142,11 +150,23 @@ body, html, #root {
   justify-content: center;
 }
 
+.banner-image {
+  max-width: 728px;
+  width: 100%;
+  height: 90px;
+  object-fit: cover;
+  border-radius: 4px;
+}
+
+/* ======================================
+   3. BUTTON GROUP
+   ====================================== */
 .button-group {
   position: fixed;
-  top: 160px; /* top-bar (70px) + banner (90px) */
-  left: 50%;
-  transform: translateX(-50%);
+  top: 164px; /* top-bar (70px) + banner (90px) + 4px gap */
+  left: 0;
+  right: 0;
+  margin: 0 auto;
   z-index: 1180;
   width: 100vw;
   background: #fff;
@@ -176,19 +196,56 @@ body, html, #root {
   background: #1769aa;
 }
 
-@media (max-width: 900px) {
-  .banner-placeholder {
-    width: 100vw;
-    height: 100px;
-    left: 0;
-    font-size: 1rem;
-    border-radius: 0;
-  }
-  .title { font-size: 1.2rem; }
-  .welcome-header { font-size: 1rem; margin-left: 8px; }
-  .content-container { margin-top: 244px; }
+/* ======================================
+   4. CONTENT CONTAINER
+   ====================================== */
+.content-container {
+  margin-top: 230px; /* top-bar (70px) + banner (90px) + button-group height (~70px) */
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  box-sizing: border-box;
 }
 
+.scrollable-content {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  box-sizing: border-box;
+  min-height: calc(100vh - 70px);
+}
+
+
+/* ======================================
+   RESPONSIVE BREAKPOINTS
+   ====================================== */
+
+/* Tablet (601px - 900px) */
+@media (max-width: 900px) and (min-width: 601px) {
+  .banner-placeholder {
+    height: 100px;
+  }
+  .banner-image {
+    height: 100px;
+  }
+  .title { 
+    font-size: 1.2rem; 
+  }
+  .welcome-header { 
+    font-size: 1rem; 
+    margin-left: 8px; 
+  }
+  .content-container { 
+    margin-top: 230px; /* adjusted for larger banner + button group */
+  }
+  .button-group {
+    top: 174px; /* top-bar (70px) + banner (100px) + 4px gap */
+  }
+
+}
+
+/* Mobile (max-width: 600px) */
 @media (max-width: 600px) {
   .top-bar {
     flex-direction: column;
@@ -197,108 +254,101 @@ body, html, #root {
     padding-bottom: 4px;
     justify-content: center;
   }
-  .fixed-header-bg {
-    height: 156px;
-  }
-  .banner-placeholder {
-    width: 100vw;
-    height: 60px;
-    left: 0;
-    font-size: 0.95rem;
-    border-radius: 0;
-  }
+  
   .title {
     margin: 0 0 2px 0;
     font-size: 1.1rem;
   }
+  
   .welcome-header {
     font-size: 0.95rem;
     margin-left: 0;
     margin-top: 2px;
   }
+  
+  .banner-placeholder {
+    height: 60px;
+    font-size: 0.95rem;
+  }
+  
+  .banner-image {
+    height: 60px;
+  }
+  
   .button-group {
-    top: 124px; /* top-bar (56px) + banner (60px) + 8px boşluk */
+    top: 128px; /* mobile header + banner + gap */
     gap: 8px;
-    width: 100vw;
     padding: 6px 0;
-    background: #fff;
-    z-index: 1102;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.07);
   }
+  
   .content-container {
-    margin-top: 52px;
-    width: 100vw;
-    max-width: 100vw;
-    overflow-x: hidden;
-    align-items: center;
+    margin-top: 170px; /* mobile header + banner + button group */
+    display: flex;
+    flex-direction: column;
   }
-  .my-blocks-container {
-    width: 100vw;
-    max-width: 100vw;
-    overflow-x: hidden;
-    margin-left: 0;
-    margin-right: 0;
-    align-items: center;
+  
+  .action-button { 
+    padding: 8px 12px; 
+    font-size: 0.95rem; 
   }
-  .my-blocks-container .grid-container {
-    width: 100vw;
-    max-width: 100vw;
-    overflow-x: hidden;
-    margin-left: 0;
-    margin-right: 0;
-    justify-content: center;
-    align-items: center;
+  
+
+}
+
+@media (max-width: 600px) and (hover: none) and (pointer: coarse) {
+  @supports (-webkit-touch-callout: none) {
+    .banner-placeholder,
+    .button-group {
+      width: 100% !important;
+      left: 0 !important;
+      right: 0 !important;
+      min-width: 0 !important;
+    }
   }
-  .action-button { padding: 8px 12px; font-size: 0.95rem; }
-  .title { font-size: 1.1rem; }
-  /* .welcome kaldırıldı */
 }
 
-.scrollable-content {
-  width: 100vw;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  box-sizing: border-box;
-  min-height: calc(100vh - 70px);
-}
+/* iOS Safari için özel düzeltmeler */
+@media (max-width: 600px) and (hover: none) and (pointer: coarse) {
+  @supports (-webkit-touch-callout: none) {
+    .banner-placeholder,
+    .button-group {
+      z-index: 1300 !important;
+    }
 
-.welcome {
-  font-size: 1.5rem;
-  margin-bottom: 32px;
-  text-align: center;
-  width: 100%;
-  color: #333;
-  font-weight: bold;
-  letter-spacing: 1px;
-}
-
-/* Modal ve diğer özel stiller eski haliyle korunabilir */
-
-/* Grid'in ortalanması için ek kontrol */
-.grid-container, .grid-root, .grid {
-  margin-left: auto;
-  margin-right: auto;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-}
-
-/* Grid ile sabit alanlar arasında hiçbir boşluk kalmaması için opak overlay */
-.header-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100vw;
-  height: 234px; /* 244px (gridin margin-top'u) - 10px */
-  background: #fff;
-  z-index: 1100;
-  pointer-events: none;
-}
-
-@media (max-width: 600px) {
-  .header-overlay {
-    top: 0;
-    height: 156px;
+    .scrollable-content,
+    .content-container {
+      overflow-x: visible !important;
+    }
+    .menu-dropdown {
+      position: fixed !important;
+      z-index: 9999 !important;
+      top: 70px !important;
+      left: 0 !important;
+      right: 0 !important;
+      width: 100vw !important;
+    }
+    .settings-modal,
+    .about-modal,
+    .tokenomics-modal,
+    .contact-modal {
+      z-index: 4100 !important;
+    }
   }
+}
+
+/* Blockchain Stats Button Special Styling */
+.blockchain-stats-button {
+  position: relative;
+  overflow: hidden;
+  box-shadow: 0 4px 15px rgba(76, 175, 80, 0.3) !important;
+  transition: all 0.3s ease !important;
+}
+
+.blockchain-stats-button:hover {
+  transform: translateY(-2px) !important;
+  box-shadow: 0 6px 20px rgba(76, 175, 80, 0.4) !important;
+}
+
+.blockchain-stats-button:active {
+  transform: translateY(0) !important;
 }
