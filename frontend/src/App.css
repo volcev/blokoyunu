@@ -19,6 +19,17 @@ body, html, #root {
   background: #f7f7fa;
 }
 
+.fixed-header-bg {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 230px; /* Default height for top-bar + banner + button-group */
+  background: #f7f7fa;
+  z-index: 1000;
+  pointer-events: none; /* Allows clicks to pass through */
+}
+
 /* ======================================
    1. TOP BAR (Header)
    ====================================== */
@@ -28,7 +39,7 @@ body, html, #root {
   left: 0; 
   width: 100vw;
   height: 70px;
-  background: #fff;
+  background: transparent; /* Make top-bar background transparent */
   box-shadow: 0 2px 8px rgba(0,0,0,0.07);
   display: flex;
   align-items: center;
@@ -129,7 +140,7 @@ body, html, #root {
   left: 0;
   width: 100vw;
   height: 90px;
-  background: #fff;
+  background: transparent; /* Make banner background transparent */
   border-radius: 0;
   display: flex;
   align-items: center;
@@ -169,7 +180,7 @@ body, html, #root {
   margin: 0 auto;
   z-index: 1180;
   width: 100vw;
-  background: #fff;
+  background: transparent; /* Make button-group background transparent */
   padding: 8px 0;
   display: flex;
   gap: 16px;
@@ -205,6 +216,7 @@ body, html, #root {
   flex-direction: column;
   width: 100%;
   box-sizing: border-box;
+  background-color: #f7f7fa; /* Add this to ensure content area has correct bg */
 }
 
 .scrollable-content {
@@ -223,6 +235,9 @@ body, html, #root {
 
 /* Tablet (601px - 900px) */
 @media (max-width: 900px) and (min-width: 601px) {
+  .fixed-header-bg {
+    height: 230px; /* Adjust if needed for tablet */
+  }
   .banner-placeholder {
     height: 100px;
   }
@@ -247,6 +262,9 @@ body, html, #root {
 
 /* Mobile (max-width: 600px) */
 @media (max-width: 600px) {
+  .fixed-header-bg {
+    height: 170px; /* Adjust for mobile layout */
+  }
   .top-bar {
     flex-direction: column;
     align-items: center;

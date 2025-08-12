@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, Dispatch, SetStateAction } from "react";
+import React, { useEffect, useState, useCallback, Dispatch, SetStateAction, useRef } from "react";
 import { createPortal } from "react-dom";
 import "./Grid.css";
 
@@ -31,9 +31,12 @@ const Grid: React.FC<Props> = ({ username, userColor, showSettings, setShowSetti
   const [blockStates, setBlockStates] = useState<BlockState[]>([]);
   const [isMining, setIsMining] = useState<boolean>(false);
   const [selectedBlockIndex, setSelectedBlockIndex] = useState<number | null>(null);
+  const [newlyDugBlocks, setNewlyDugBlocks] = useState<Set<number>>(new Set());
   
   // Block Info Modal State
   const [showBlockModal, setShowBlockModal] = useState<boolean>(false);
+  const blockRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const isInitialLoad = useRef(true);
   
   // Get safe modal width based on screen size
   const getModalWidth = () => {
@@ -234,6 +237,31 @@ const Grid: React.FC<Props> = ({ username, userColor, showSettings, setShowSetti
     });
   }, [blockData]);
 
+  useEffect(() => {
+    if (isInitialLoad.current && blockStates.length > 0) {
+      const firstIdleIndex = blockStates.findIndex(state => state === 'idle');
+
+      if (firstIdleIndex !== -1) {
+        setTimeout(() => {
+          const blockElement = blockRefs.current[firstIdleIndex];
+          if (blockElement) {
+            const rect = blockElement.getBoundingClientRect();
+            const isInViewport =
+              rect.top >= 0 &&
+              rect.left >= 0 &&
+              rect.bottom <= (window.innerHeight || document.documentElement.clientHeight) &&
+              rect.right <= (window.innerWidth || document.documentElement.clientWidth);
+
+            if (!isInViewport) {
+              blockElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+            isInitialLoad.current = false;
+          }
+        }, 100);
+      }
+    }
+  }, [blockStates]);
+
   const handleBlockClick = (index: number) => {
     setSelectedBlockIndex(index);
     setShowBlockModal(true);
@@ -285,6 +313,21 @@ const Grid: React.FC<Props> = ({ username, userColor, showSettings, setShowSetti
         setBlockStates(newStates);
         await fetchGrid(); // Hata durumunda grid yenile
       } else {
+        // Successful dig
+        setNewlyDugBlocks(prev => {
+          const newSet = new Set(prev);
+          newSet.add(index);
+          return newSet;
+        });
+
+        setTimeout(() => {
+          setNewlyDugBlocks(prev => {
+            const newSet = new Set(prev);
+            newSet.delete(index);
+            return newSet;
+          });
+        }, 6000); // Remove after 6 seconds (animation duration)
+
         await fetchGrid(); // Refresh grid after successful mining
       }
     } catch (error) {
@@ -331,6 +374,7 @@ const Grid: React.FC<Props> = ({ username, userColor, showSettings, setShowSetti
           const visualContent = state === "digging" ? "⏳" : "";
           return (
             <div
+              ref={el => { blockRefs.current[index] = el; }}
               key={index}
               className={`grid-block ${state}${isUserBlock ? " my-block" : ""}`}
               title={
@@ -349,6 +393,9 @@ const Grid: React.FC<Props> = ({ username, userColor, showSettings, setShowSetti
               onClick={() => handleBlockClick(index)}
             >
               {visualContent}
+              {newlyDugBlocks.has(index) && (
+                <div className="newly-dug-visual">😊</div>
+              )}
             </div>
           );
         })}
