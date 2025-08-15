@@ -20,15 +20,43 @@ type Block = {
   dugBy: string | null;
   color?: string | null;
   visual?: string | null;
+  // PoW-related fields (optional)
+  height?: number;
+  nonce?: number;
+  hash?: string;
 };
 
 type BlockState = "idle" | "digging" | "dug";
+type MiningStatus = 'idle' | 'fetching_challenge' | 'mining' | 'submitting' | 'success' | 'error';
+
+// POW endpoint (Nginx'te /pow/ --> 4001'e gidiyor)
+const POW_API = '/pow';
+
+// Kullanıcı pubkey'ini al (64 hex bekliyoruz, yoksa dummy)
+const getUserPubkeyHex = () => {
+  const v = localStorage.getItem('user_pubkey') || '';
+  return /^[0-9a-fA-F]{64}$/.test(v) ? v : '0'.repeat(64);
+};
+
+// Arka planda PoW'u UI'ı bekletmeden tetikle (shadow)
+async function kickPowShadow(pubkeyHex: string) {
+  try {
+    const t = await fetch(`${POW_API}/target`).then(r => r.json());
+    const w = new Worker('/powWorker.js?v=1');
+    w.postMessage({ ...t, pubkey: pubkeyHex, apiBase: POW_API });
+    // sonucu önemsemiyoruz; worker kendi kendine kapanır
+    w.onmessage = () => w.terminate();
+    w.onerror = () => w.terminate();
+  } catch {}
+}
 
 // Grid is always 10x10
 const API_BASE = "";
+const USE_POW_MINING = false; // Set to true to enable PoW mining, false for 10s timer
 
 const Grid: React.FC<Props> = ({ username, userColor, showSettings, setShowSettings, handleLogout, setUsername, tokenBalance, setTokenBalance, blockData, setBlockData }) => {
   const [blockStates, setBlockStates] = useState<BlockState[]>([]);
+  const [miningStatus, setMiningStatus] = useState<MiningStatus>('idle');
   const [isMining, setIsMining] = useState<boolean>(false);
   const [selectedBlockIndex, setSelectedBlockIndex] = useState<number | null>(null);
   const [newlyDugBlocks, setNewlyDugBlocks] = useState<Set<number>>(new Set());
@@ -268,76 +296,179 @@ const Grid: React.FC<Props> = ({ username, userColor, showSettings, setShowSetti
   };
 
   const handleDigBlock = async (index: number) => {
-    if (blockStates[index] !== "idle" || isMining) return;
+    if (isMining || !username) return;
 
-    setShowBlockModal(false); // Close modal first
-    setIsMining(true);
-    const newStates = [...blockStates];
-    newStates[index] = "digging";
-    setBlockStates(newStates);
+    if (USE_POW_MINING) {
+      if (miningStatus !== 'idle') return;
 
-    try {
-      await new Promise((resolve) => setTimeout(resolve, 10000));
+      setShowBlockModal(false);
+      setIsMining(true);
+      setMiningStatus('fetching_challenge');
 
-      const response = await fetch(`${API_BASE}/grid/${index}`, {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Session-Token": localStorage.getItem("session_token") || ""
-        },
-        body: JSON.stringify({
-          dugBy: username,
-          color: userColor,
-          visual: null,
-        }),
-      });
-
-      if (!response.ok) {
-        const result = await response.json();
-        if (response.status === 401 || result.error === 'Unauthorized: Invalid or missing session token') {
-          alert('Your session has expired. Please log in again.');
-          localStorage.removeItem('session_token');
-          localStorage.removeItem('username');
-          localStorage.removeItem(`color_${username}`);
-          window.location.reload();
-          return;
+      try {
+        // 1. Fetch the mining challenge from our new PoW service
+        const targetRes = await fetch('/pow/target');
+        if (!targetRes.ok) {
+          throw new Error('Failed to fetch mining challenge.');
         }
-        if (response.status === 429 && result.error === 'Daily mining limit reached') {
-          alert('Your daily mining limit is reached. Please come back tomorrow!');
-          newStates[index] = "idle";
-          setBlockStates(newStates);
-          return;
-        }
-        alert(result.error || "Digging failed");
-        newStates[index] = "idle";
-        setBlockStates(newStates);
-        await fetchGrid(); // Hata durumunda grid yenile
-      } else {
-        // Successful dig
-        setNewlyDugBlocks(prev => {
-          const newSet = new Set(prev);
-          newSet.add(index);
-          return newSet;
+        const challenge = await targetRes.json();
+
+        setMiningStatus('mining');
+
+        // 2. Start the Web Worker to solve the challenge
+        const worker = new Worker('/powWorker.js?v=1');
+
+        worker.postMessage({
+          ...challenge,
+          pubkey: getUserPubkeyHex(),      // <-- '0'.repeat(64) yerine bu
+          apiBase: POW_API                 // <-- window.location.origin yerine bu
         });
 
-        setTimeout(() => {
-          setNewlyDugBlocks(prev => {
-            const newSet = new Set(prev);
-            newSet.delete(index);
-            return newSet;
-          });
-        }, 6000); // Remove after 6 seconds (animation duration)
+        worker.onmessage = async (event) => {
+          worker.terminate();
+          const { ok, error, nonce, hash } = event.data;
 
-        await fetchGrid(); // Refresh grid after successful mining
+          if (ok) {
+            setMiningStatus('submitting');
+            
+            // 3. Submit the solved block to the main backend
+            const response = await fetch(`${API_BASE}/grid/${index}`, {
+              method: "PATCH",
+              headers: {
+                "Content-Type": "application/json",
+                "X-Session-Token": localStorage.getItem("session_token") || ""
+              },
+              body: JSON.stringify({
+                dugBy: username,
+                color: userColor,
+                visual: null,
+                height: challenge.height,
+                nonce: nonce,
+                hash: hash
+              }),
+            });
+            
+            if (!response.ok) {
+              const result = await response.json();
+               if (response.status === 401 || result.error === 'Unauthorized: Invalid or missing session token') {
+                alert('Your session has expired. Please log in again.');
+                localStorage.removeItem('session_token');
+                localStorage.removeItem('username');
+                localStorage.removeItem(`color_${username}`);
+                window.location.reload();
+                return;
+              }
+              if (response.status === 429 && result.error === 'Daily mining limit reached') {
+                alert('Your daily mining limit is reached. Please come back tomorrow!');
+                return;
+              }
+              throw new Error(result.error || "Submitting block failed");
+            }
+
+            setMiningStatus('success');
+            // Visual feedback for newly dug block
+            setNewlyDugBlocks(prev => new Set(prev).add(index));
+            setTimeout(() => {
+              setNewlyDugBlocks(prev => {
+                const newSet = new Set(prev);
+                newSet.delete(index);
+                return newSet;
+              });
+            }, 6000);
+
+            await fetchGrid(); // Refresh grid state
+
+          } else {
+            throw new Error(error || 'Mining worker failed.');
+          }
+        };
+
+        worker.onerror = (err) => {
+          worker.terminate();
+          throw err;
+        };
+
+      } catch (error) {
+        console.error("Mining process failed:", error);
+        alert(`Mining failed: ${error instanceof Error ? error.message : String(error)}`);
+        setMiningStatus('error');
+      } finally {
+        // Reset status after a delay to show success/error message
+        setTimeout(() => {
+          setIsMining(false);
+          setMiningStatus('idle');
+        }, 2000);
       }
-    } catch (error) {
-      console.error("Failed to save digging:", error);
-      alert("Digging failed");
-      newStates[index] = "idle";
+    } else {
+      // Original 10-second timer logic
+      if (blockStates[index] !== "idle") return;
+
+      setShowBlockModal(false);
+      setIsMining(true);
+      const newStates = [...blockStates];
+      newStates[index] = "digging";
       setBlockStates(newStates);
-      await fetchGrid(); // Hata durumunda grid yenile
-    } finally {
-      setIsMining(false);
+
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 10000));
+
+        const response = await fetch(`${API_BASE}/grid/${index}`, {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Session-Token": localStorage.getItem("session_token") || ""
+          },
+          body: JSON.stringify({
+            dugBy: username,
+            color: userColor,
+            visual: null,
+          }),
+        });
+
+        if (!response.ok) {
+          const result = await response.json();
+          if (response.status === 401 || result.error === 'Unauthorized: Invalid or missing session token') {
+            alert('Your session has expired. Please log in again.');
+            localStorage.removeItem('session_token');
+            localStorage.removeItem('username');
+            localStorage.removeItem(`color_${username}`);
+            window.location.reload();
+            return;
+          }
+          if (response.status === 429 && result.error === 'Daily mining limit reached') {
+            alert('Your daily mining limit is reached. Please come back tomorrow!');
+            newStates[index] = "idle";
+            setBlockStates(newStates);
+            return;
+          }
+          alert(result.error || "Digging failed");
+          newStates[index] = "idle";
+          setBlockStates(newStates);
+          await fetchGrid();
+        } else {
+          setNewlyDugBlocks(prev => new Set(prev).add(index));
+          setTimeout(() => {
+            setNewlyDugBlocks(prev => {
+              const newSet = new Set(prev);
+              newSet.delete(index);
+              return newSet;
+            });
+          }, 6000);
+
+          await fetchGrid();
+
+          // >>> shadow PoW (opsiyonel)
+          kickPowShadow(getUserPubkeyHex());
+        }
+      } catch (error) {
+        console.error("Failed to save digging:", error);
+        alert("Digging failed");
+        newStates[index] = "idle";
+        setBlockStates(newStates);
+        await fetchGrid();
+      } finally {
+        setIsMining(false);
+      }
     }
   };
 
@@ -371,7 +502,23 @@ const Grid: React.FC<Props> = ({ username, userColor, showSettings, setShowSetti
           const isUserBlock = block?.dugBy === username;
           const blockColor = block?.dugBy && userColors[block.dugBy] ? userColors[block.dugBy] : "transparent";
           const bgColor = state === "dug" ? blockColor : "transparent";
-          const visualContent = state === "digging" ? "⏳" : "";
+          
+          let visualContent = "";
+          if (state === 'digging' || (isMining && selectedBlockIndex === index)) {
+            if (USE_POW_MINING) {
+              switch (miningStatus) {
+                case 'fetching_challenge': visualContent = '⚙️'; break;
+                case 'mining': visualContent = '⛏️'; break;
+                case 'submitting': visualContent = '🔗'; break;
+                case 'success': visualContent = '✅'; break;
+                case 'error': visualContent = '❌'; break;
+                default: visualContent = '⏳';
+              }
+            } else {
+              visualContent = '⏳';
+            }
+          }
+
           return (
             <div
               ref={el => { blockRefs.current[index] = el; }}
@@ -392,10 +539,12 @@ const Grid: React.FC<Props> = ({ username, userColor, showSettings, setShowSetti
               }}
               onClick={() => handleBlockClick(index)}
             >
-              {visualContent}
-              {newlyDugBlocks.has(index) && (
-                <div className="newly-dug-visual">😊</div>
-              )}
+              <div style={{ position: 'relative', width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                {visualContent}
+                {newlyDugBlocks.has(index) && (
+                  <div className="newly-dug-visual">😊</div>
+                )}
+              </div>
             </div>
           );
         })}
@@ -486,7 +635,7 @@ const Grid: React.FC<Props> = ({ username, userColor, showSettings, setShowSetti
                     minWidth: '80px',
                   }}
                 >
-                  {isMining ? "Mining..." : "Dig"}
+                  {isMining ? (USE_POW_MINING ? `Mining... (${miningStatus})` : "Mining...") : "Dig"}
                 </button>
               )}
               <button 

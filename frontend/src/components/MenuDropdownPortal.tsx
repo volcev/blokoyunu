@@ -7,7 +7,9 @@ interface MenuDropdownPortalProps {
   left?: number;
   onInfo: () => void;
   onSettings: () => void;
-  onTokenomics: () => void;
+  onVolore: () => void;
+  onVolchainActivity: () => void;
+  // Removed Tokenomics
   onContact: () => void;
   onLogout: () => void;
 }
@@ -18,7 +20,9 @@ const MenuDropdownPortal: React.FC<MenuDropdownPortalProps> = ({
   left = 24,
   onInfo,
   onSettings,
-  onTokenomics,
+  onVolore,
+  onVolchainActivity,
+  
   onContact,
   onLogout,
 }) => {
@@ -39,7 +43,9 @@ const MenuDropdownPortal: React.FC<MenuDropdownPortalProps> = ({
     >
       <button onClick={onInfo}>Info</button>
       <button onClick={onSettings}>Settings</button>
-      <button onClick={onTokenomics}>Tokenomics</button>
+      <button onClick={onVolore}>Volore</button>
+      <button onClick={onVolchainActivity}>Volchain Activity</button>
+      
       <button onClick={onContact}>Contact Us</button>
       <button
         onClick={onLogout}

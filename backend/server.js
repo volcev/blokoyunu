@@ -3,28 +3,27 @@ const fs = require('fs');
 const path = require('path');
 const cors = require('cors');
 const axios = require('axios');
-const { Connection, PublicKey, Keypair, clusterApiUrl, Transaction, SystemProgram } = require('@solana/web3.js');
-const { getOrCreateAssociatedTokenAccount, createTransferInstruction } = require('@solana/spl-token');
-const { Program, AnchorProvider, Wallet, BN } = require('@coral-xyz/anchor');
+// Removed Solana/Anchor dependencies
 const bcrypt = require('bcrypt');
-const { readSessions, writeSessions } = require('./auth');
+const crypto = require('crypto');
+const { readSessions, writeSessions } = require('./auth.js');
 
 const app = express();
 const PORT = 3001;
 
 // Session management (now persistent via auth.js)
-const DB_FILE = './db.json';
+const DB_FILE = path.join(__dirname, 'db.json');
 
 // Helper function to validate session via auth server
 async function validateSession(sessionToken) {
   try {
-    const sessions = readSessions();
-    if (sessions[sessionToken]) {
-      return sessions[sessionToken].username;
+    const response = await axios.post('http://localhost:3002/validate-session', { sessionToken });
+    if (response.data && response.data.valid) {
+      return response.data.username;
     }
     return null;
   } catch (error) {
-    console.error('Session validation error:', error);
+    console.error('[validateSession] Axios request failed:', error.message);
     return null;
   }
 }
@@ -62,170 +61,52 @@ function getNeighbors(index, totalBlocks, columnCount) {
   return neighbors;
 }
 
-const connection = new Connection(clusterApiUrl('devnet'), 'confirmed');
-const TOKEN_PROGRAM_ID = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
-const THE_TOKEN_MINT = new PublicKey('7gryqXLucgivS9NHgnA22WFZqLG8jU317pBJYeWkGynH');
+// Compute stats locally (Solana removed)
+function computeLocalStats(username = null) {
+  const data = readDB();
+  const totalBlocks = data.grid.length;
+  const minedBlocks = data.grid.filter(b => b.dugBy).length;
 
-const secretKey = JSON.parse(fs.readFileSync('./id.json', 'utf8'));
-const senderKeypair = Keypair.fromSecretKey(Uint8Array.from(secretKey));
-
-// Blockchain Stats Configuration
-const STATS_PROGRAM_ID = '5f6EPwYGs9LqSYoGb9mBfDwPTmfyQMVq9ERrAgpdojCN';
-let blockchainStatsEnabled = false;
-let gameStatsPDA = null;
-
-// Initialize blockchain stats (safely)
-async function initializeBlockchainStats() {
-  try {
-    console.log('Attempting to initialize blockchain stats connection...');
-    
-    const programId = new PublicKey(STATS_PROGRAM_ID);
-    const [pda] = PublicKey.findProgramAddressSync(
-      [Buffer.from("game_stats")],
-      programId
-    );
-    gameStatsPDA = pda;
-    blockchainStatsEnabled = true;
-    
-    console.log('✅ Blockchain stats initialized successfully');
-    console.log('📍 Game Stats PDA:', gameStatsPDA.toString());
-  } catch (error) {
-    console.log('❌ Blockchain stats initialization failed:', error.message);
-    console.log('🔄 Continuing with local stats fallback...');
-    blockchainStatsEnabled = false;
-  }
-}
-
-// Initialize on startup
-initializeBlockchainStats();
-
-// Real blockchain stats functions
-async function incrementBlocksMinedOnChain(amount = 1) {
-  if (!blockchainStatsEnabled) {
-    console.log('⚠️ Blockchain stats disabled, skipping on-chain update');
-    return null;
-  }
-  
-  try {
-    console.log(`📊 On-chain stats update: +${amount} blocks mined`);
-    console.log(`🔗 PDA: ${gameStatsPDA.toString()}`);
-    console.log(`🎯 Program: ${STATS_PROGRAM_ID}`);
-    
-    // For now, we'll log the intended transaction
-    // Full implementation would require Anchor client setup
-    const mockTx = `real_tx_${Date.now()}`;
-    console.log(`✅ Would execute transaction: ${mockTx}`);
-    
-    return mockTx;
-  } catch (error) {
-    console.error('Failed to update on-chain stats:', error);
-    return null;
-  }
-}
-
-
-
-async function getOnChainStats(username = null) {
-  if (!blockchainStatsEnabled) {
-    return null;
-  }
-  
-  try {
-    // Try to fetch from the real blockchain account
-    console.log('📊 Attempting to fetch detailed blockchain stats...');
-    console.log(`🔗 PDA: ${gameStatsPDA.toString()}`);
-    
-    const data = readDB();
-    
-    // 1. Total number of blocks in grid
-    const totalBlocks = data.grid.length;
-    
-    // 2. Number of mined blocks in grid  
-    const minedBlocks = data.grid.filter(b => b.dugBy).length;
-    
-    // 3. Top 3 users with most blocks
-    const playerCounts = {};
-    data.grid.forEach(block => {
-      if (block.dugBy) {
-        playerCounts[block.dugBy] = (playerCounts[block.dugBy] || 0) + 1;
-      }
-    });
-    
-    const topMiners = Object.entries(playerCounts)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 3)
-      .map(([name, count]) => {
-        // Find user's color
-        const user = data.users.find(u => u.username === name);
-        return {
-          name,
-          blockCount: count,
-          color: user ? user.color : "#888"
-        };
-      });
-
-    // Top 3 THET owners
-    const topThetOwners = data.users
-      .filter(user => user.sentTokens && user.sentTokens > 0)
-      .sort((a, b) => (b.sentTokens || 0) - (a.sentTokens || 0))
-      .slice(0, 3)
-      .map(user => ({
-        name: user.username,
-        thetEarned: user.sentTokens || 0,
-        color: user.color || "#888"
-      }));
-    
-    // 4. Current user's information (if username provided)
-    let currentUserStats = null;
-    if (username) {
-      const user = data.users.find(u => u.username === username);
-      const userBlockCount = playerCounts[username] || 0;
-      
-      // Calculate remaining mining rights for today
-      const today = new Date().toISOString().slice(0, 10);
-      let remainingMines = 12; // Default daily limit
-      
-      if (user && user.lastDigDate === today) {
-        remainingMines = Math.max(0, 12 - (user.dailyDigCount || 0));
-      }
-      
-      currentUserStats = {
-        username,
-        totalBlocks: userBlockCount,
-        remainingMines,
-        color: user ? user.color : "#888",
-        thetEarned: user ? (user.sentTokens || 0) : 0
-      };
+  const playerCounts = {};
+  data.grid.forEach(block => {
+    if (block.dugBy) {
+      playerCounts[block.dugBy] = (playerCounts[block.dugBy] || 0) + 1;
     }
-    
-    const detailedStats = {
-      // Temel bilgiler
-      totalBlocks,
-      minedBlocks,
-      emptyBlocks: totalBlocks - minedBlocks,
-      
-      // Top 3 miners and THET owners
-      topMiners,
-      topThetOwners,
-      
-      // Current user information
-      currentUser: currentUserStats,
-      
-      // Blockchain bilgileri
-      programId: STATS_PROGRAM_ID,
-      gameStatsPDA: gameStatsPDA.toString(),
-      
-      // Legacy values (for compatibility)
-      totalBlocksMined: minedBlocks,
-      gridExpansions: Math.floor(totalBlocks / 100) - 1
+  });
+
+  const topMiners = Object.entries(playerCounts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .map(([name, count]) => {
+      const user = data.users.find(u => u.username === name);
+      return { name, blockCount: count, color: user ? user.color : '#888' };
+    });
+
+  let currentUserStats = null;
+  if (username) {
+    const user = data.users.find(u => u.username === username);
+    const today = new Date().toISOString().slice(0, 10);
+    let remainingMines = 12;
+    if (user && user.lastDigDate === today) {
+      remainingMines = Math.max(0, 12 - (user.dailyDigCount || 0));
+    }
+    currentUserStats = {
+      username,
+      totalBlocks: playerCounts[username] || 0,
+      remainingMines,
+      color: user ? user.color : '#888'
     };
-    
-    console.log('✅ Detailed blockchain stats:', detailedStats);
-    return detailedStats;
-  } catch (error) {
-    console.error('Failed to fetch on-chain stats:', error);
-    return null;
   }
+
+  return {
+    totalBlocks,
+    minedBlocks,
+    emptyBlocks: totalBlocks - minedBlocks,
+    topMiners,
+    currentUser: currentUserStats,
+    totalBlocksMined: minedBlocks,
+    gridExpansions: Math.floor(totalBlocks / 100) - 1
+  };
 }
 
 app.use(cors());
@@ -243,7 +124,7 @@ function writeDB(data) {
   fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2));
 }
 
-const GRIDB_FILE = './gridb.json';
+const GRIDB_FILE = path.join(__dirname, 'gridb.json');
 function readGridB(totalBlocks) {
   try {
     const arr = JSON.parse(fs.readFileSync(GRIDB_FILE, 'utf8'));
@@ -311,7 +192,7 @@ app.patch('/grid/:index', async (req, res) => {
       ).length;
       
       // Auto-mine blocks equal to castle count
-      for(let i = 0; i < castleCount; i++) {
+      for (let i = 0; i < castleCount; i++) {
         const emptyBlock = data.grid.find(b => !b.dugBy);
         if (emptyBlock) {
           emptyBlock.dugBy = username;
@@ -320,6 +201,17 @@ app.patch('/grid/:index', async (req, res) => {
       
       if (castleCount > 0) {
         console.log(`🏰 Castle bonus: ${username} auto-mined ${castleCount} blocks`);
+        // Also mint Volore on Volchain for castle auto-mined blocks
+        try {
+          const userRecord = data.users.find(u => u.username === username);
+          if (userRecord && userRecord.powPubkey) {
+            // Reconcile instead of incremental add
+            reconcileUserBalanceWithGrid(data, username);
+            appendVolchainEvent({ type: 'mint', reason: 'castle_bonus', username, pubkey: userRecord.powPubkey, amount: castleCount });
+          }
+        } catch (e) {
+          console.log('Castle bonus mint error:', e.message);
+        }
       }
     } catch (error) {
       console.log('Castle bonus error:', error.message);
@@ -337,10 +229,19 @@ app.patch('/grid/:index', async (req, res) => {
   block.visual = visual || null;
   writeDB(data);
 
-  // Update on-chain stats (non-blocking)
-  incrementBlocksMinedOnChain(1).catch(err => {
-    console.log('On-chain stats update failed (continuing anyway):', err.message);
-  });
+  // Mint 1 Volore coin on Volchain for this successful dig (increment balance by 1)
+  try {
+    // Reconcile after dig: balance = total dug blocks
+    reconcileUserBalanceWithGrid(data, username);
+    const userRecord = data.users.find(u => u.username === username);
+    if (userRecord && userRecord.powPubkey) {
+      appendVolchainEvent({ type: 'mint', reason: 'dig', username, pubkey: userRecord.powPubkey, amount: 1, gridIndex: index });
+    }
+  } catch (e) {
+    console.error('volchain mint error:', e.message);
+  }
+
+  // On-chain stats removed
 
   res.json({ success: true });
 });
@@ -378,173 +279,120 @@ app.get('/top-miners', (req, res) => {
   res.json(sorted);
 });
 
-// Initialize game stats on blockchain (demo version)
-app.post('/stats/initialize', async (req, res) => {
+// Volchain stats: Volore balances and top holders
+app.get('/stats/volchain', (req, res) => {
   try {
-    console.log('🚀 Demo: Initializing game stats on blockchain...');
-    
-    if (!blockchainStatsEnabled) {
-      return res.json({
-        success: false,
-        message: 'Blockchain stats not available',
-        note: 'PDA generation failed during startup'
-      });
+    const username = req.query.username;
+    const grid = computeLocalStats(username || null);
+    const db = readDB();
+    // Enforce invariant on-the-fly before reporting
+    reconcileAllBalancesWithGrid(db);
+    const accounts = readAccounts();
+
+    // Map powPubkey -> user (for labeling)
+    const pubToUser = {};
+    for (const u of db.users) {
+      if (u.powPubkey) pubToUser[u.powPubkey] = u;
     }
-    
-    // For demo purposes, simulate initialization
-    console.log('📍 Game Stats PDA:', gameStatsPDA.toString());
-    console.log('🔗 Program ID:', STATS_PROGRAM_ID);
-    
-    const mockTx = `init_tx_${Date.now()}`;
-    console.log('✅ Mock initialization complete! Transaction:', mockTx);
-    
-    res.json({ 
-      success: true, 
-      message: 'Game stats demo initialized',
-      transactionId: mockTx,
-      programId: STATS_PROGRAM_ID,
-      gameStatsPDA: gameStatsPDA.toString()
+
+    // Aggregate totals and prepare holders
+    let totalSupply = 0;
+    const holders = Object.entries(accounts).map(([pubkey, info]) => {
+      const balance = (info && typeof info.balance === 'number') ? info.balance : 0;
+      totalSupply += balance;
+      const user = pubToUser[pubkey];
+      return {
+        pubkey,
+        balance,
+        name: user ? user.username : pubkey.slice(0, 8),
+        color: user && user.color ? user.color : '#888'
+      };
+    }).sort((a, b) => b.balance - a.balance);
+
+    // Current user info
+    let currentUser = null;
+    if (username) {
+      const user = db.users.find(u => u.username === username);
+      const pubkey = user && user.powPubkey ? user.powPubkey : null;
+      const balance = pubkey && accounts[pubkey] && typeof accounts[pubkey].balance === 'number' ? accounts[pubkey].balance : 0;
+      currentUser = { pubkey, balance };
+    }
+
+    res.json({
+      success: true,
+      source: 'local',
+      grid,
+      volchain: {
+        totalSupply,
+        topHolders: holders.slice(0, 3),
+        currentUser
+      }
     });
-  } catch (error) {
-    console.error('Initialization error:', error);
-    res.status(500).json({ 
-      error: 'Failed to initialize game stats',
-      details: error.message 
-    });
+  } catch (e) {
+    console.error('stats/volchain error:', e);
+    res.status(500).json({ success: false, error: 'Failed to fetch volchain stats' });
   }
 });
+
+// Volchain events endpoint
+app.get('/volchain/events', (req, res) => {
+  try {
+    const events = readVolchainLog();
+    res.json(events);
+  } catch (e) {
+    res.status(500).json({ error: 'Failed to read volchain events' });
+  }
+});
+
+// Admin: credit all users' Volchain balances to their total mined blocks
+app.post('/admin/mint-volore-all', (req, res) => {
+  try {
+    const data = readDB();
+    const accounts = readAccounts();
+    const minedByUser = {};
+    for (const block of data.grid) {
+      if (block.dugBy) minedByUser[block.dugBy] = (minedByUser[block.dugBy] || 0) + 1;
+    }
+    let updated = 0;
+    for (const user of data.users) {
+      if (!user.powPubkey) continue;
+      const target = minedByUser[user.username] || 0;
+      const current = accounts[user.powPubkey]?.balance || 0;
+      if (current < target) {
+        accounts[user.powPubkey] = { ...(accounts[user.powPubkey] || {}), balance: target };
+        updated++;
+      }
+    }
+    writeAccounts(accounts);
+    res.json({ success: true, updated });
+  } catch (e) {
+    console.error('mint-volore-all error:', e);
+    res.status(500).json({ error: 'failed' });
+  }
+});
+
+// Stats endpoint (local only)
 
 // Get on-chain stats
 app.get('/stats/blockchain', async (req, res) => {
   try {
-    const username = req.query.username; // Username parametresi al
-    const onChainStats = await getOnChainStats(username);
-    if (onChainStats) {
-      res.json({
-        success: true,
-        stats: onChainStats,
-        source: 'blockchain'
-      });
-    } else {
-      // Fallback to local stats if blockchain is unavailable
-      const data = readDB();
-      const localStats = {
-        totalBlocks: data.grid.length,
-        minedBlocks: data.grid.filter(b => b.dugBy).length,
-        emptyBlocks: data.grid.length - data.grid.filter(b => b.dugBy).length,
-        topMiners: [],
-        currentUser: null,
-        totalBlocksMined: data.grid.filter(b => b.dugBy).length,
-        gridExpansions: Math.floor(data.grid.length / 100) - 1
-      };
-      res.json({
-        success: true,
-        stats: localStats,
-        source: 'local_fallback'
-      });
-    }
+    const username = req.query.username;
+    const stats = computeLocalStats(username);
+    res.json({ success: true, stats, source: 'local' });
   } catch (error) {
     console.error('Stats fetch error:', error);
     res.status(500).json({ error: 'Failed to fetch stats' });
   }
 });
 
-app.post('/reset-tokens', async (req, res) => {
-  const { username, walletAddress } = req.body;
-  if (!walletAddress) {
-    return res.status(400).json({ error: 'Invalid wallet address' });
-  }
-  const data = readDB();
-  const user = data.users.find(user => user.username === username);
-  if (!user) {
-    return res.status(400).json({ error: 'User not found' });
-  }
-  
-  // Calculate warzone blocks (used blocks)
-  const gridBData = readGridB(data.grid.length);
-  const warzoneBlocks = gridBData.filter(block => block.owner === username);
-  const usedBlockCount = warzoneBlocks.reduce((sum, b) => sum + (b.defense || 1), 0);
-  
-  if (usedBlockCount <= 0) {
-    return res.status(400).json({ error: 'No warzone blocks to reset' });
-  }
-  
-  try {
-    const receiverPubkey = new PublicKey(walletAddress);
-    const senderTokenAccount = await getOrCreateAssociatedTokenAccount(connection, senderKeypair, THE_TOKEN_MINT, senderKeypair.publicKey);
-    const receiverTokenAccount = await getOrCreateAssociatedTokenAccount(connection, senderKeypair, THE_TOKEN_MINT, receiverPubkey);
-    const transaction = new Transaction().add(
-      createTransferInstruction(
-        senderTokenAccount.address,
-        receiverTokenAccount.address,
-        senderKeypair.publicKey,
-        usedBlockCount * 1000000000
-      )
-    );
-    const signature = await connection.sendTransaction(transaction, [senderKeypair]);
-    await connection.confirmTransaction(signature, 'confirmed');
-    
-    // Reset warzone blocks
-    gridBData.forEach(block => {
-      if (block.owner === username) {
-        block.owner = null;
-        block.color = null;
-        block.visual = null;
-        block.userBlockIndex = null;
-        block.defense = 0;
-      }
-    });
-    writeGridB(gridBData);
-    
-    // Reset same amount of blocks from digzone (LIFO - last mined first)
-    let blocksToRemove = usedBlockCount;
-    for (let i = data.grid.length - 1; i >= 0 && blocksToRemove > 0; i--) {
-      if (data.grid[i].dugBy === username) {
-        data.grid[i].dugBy = null;
-        data.grid[i].color = null;
-        data.grid[i].visual = null;
-        blocksToRemove--;
-      }
-    }
-
-    user.sentTokens = (user.sentTokens || 0) + usedBlockCount;
-    writeDB(data);
-    res.json({ success: true, sentTokens: user.sentTokens, rewardSignature: signature, resetCount: usedBlockCount });
-  } catch (error) {
-    console.error('Reward transfer error:', error);
-    res.status(400).json({ error: error.message });
-  }
-});
-
-app.post('/transfer-token', async (req, res) => {
-  const { receiverAddress, amount } = req.body;
-  try {
-    const receiverPubkey = new PublicKey(receiverAddress);
-    const senderTokenAccount = await getOrCreateAssociatedTokenAccount(connection, senderKeypair, THE_TOKEN_MINT, senderKeypair.publicKey);
-    const receiverTokenAccount = await getOrCreateAssociatedTokenAccount(connection, senderKeypair, THE_TOKEN_MINT, receiverPubkey);
-    const transaction = new Transaction().add(
-      createTransferInstruction(
-        senderTokenAccount.address,
-        receiverTokenAccount.address,
-        senderKeypair.publicKey,
-        Math.floor(amount * 1000000000)
-      )
-    );
-    const signature = await connection.sendTransaction(transaction, [senderKeypair]);
-    await connection.confirmTransaction(signature, 'confirmed');
-    res.json({ success: true, signature });
-  } catch (error) {
-    console.error('Transfer error:', error);
-    res.status(400).json({ error: error.message });
-  }
-});
+// Removed token transfer/reset endpoints (Solana/THET removed)
 
 app.post('/api/update-username', async (req, res) => {
   const { currentUsername, newUsername } = req.body;
   if (!currentUsername || !newUsername) {
     return res.status(400).json({ error: 'Current and new usernames are required' });
   }
-  if (newUsername.length < 3) {
+  if (String(newUsername).trim().length < 3) {
     return res.status(400).json({ error: 'New username must be at least 3 characters long' });
   }
   try {
@@ -553,14 +401,17 @@ app.post('/api/update-username', async (req, res) => {
     if (userIndex === -1) {
       return res.status(404).json({ error: 'User not found' });
     }
-    const usernameExists = data.users.some(user => user.username === newUsername);
+    const normalizedNew = String(newUsername || '').trim();
+    const usernameExists = data.users.some(user => 
+      user.username.toLowerCase() === normalizedNew.toLowerCase() && user.username !== currentUsername
+    );
     if (usernameExists) {
-      return res.status(400).json({ error: 'This username is already taken' });
+      return res.status(400).json({ error: 'This username is already taken (case-insensitive)' });
     }
-    data.users[userIndex].username = newUsername;
+    data.users[userIndex].username = normalizedNew;
     data.grid = data.grid.map(block => {
       if (block.dugBy === currentUsername) {
-        return { ...block, dugBy: newUsername };
+        return { ...block, dugBy: normalizedNew };
       }
       return block;
     });
@@ -569,7 +420,7 @@ app.post('/api/update-username', async (req, res) => {
     const totalBlocks = data.grid.length;
     const gridBData = readGridB(totalBlocks);
     const updatedGridB = gridBData.map(block => 
-      block.owner === currentUsername ? { ...block, owner: newUsername } : block
+      block.owner === currentUsername ? { ...block, owner: normalizedNew } : block
     );
     writeGridB(updatedGridB);
 
@@ -594,10 +445,242 @@ app.get('/auth/user', (req, res) => {
   res.json(user);
 });
 
+const ACCOUNTS_FILE = '/home/volcev/pow-node/data/accounts.json';
+
+function readAccounts() {
+  try {
+    console.log(`[readAccounts] Reading from: ${ACCOUNTS_FILE}`);
+    if (fs.existsSync(ACCOUNTS_FILE)) {
+      return JSON.parse(fs.readFileSync(ACCOUNTS_FILE, 'utf8'));
+    }
+  } catch (error) {
+    console.error(`Error reading ${ACCOUNTS_FILE}:`, error);
+  }
+  return {};
+}
+
+function writeAccounts(data) {
+  try {
+    console.log(`[writeAccounts] Writing to: ${ACCOUNTS_FILE}`);
+    const dataDir = path.dirname(ACCOUNTS_FILE);
+    if (!fs.existsSync(dataDir)) {
+      fs.mkdirSync(dataDir, { recursive: true });
+    }
+    fs.writeFileSync(ACCOUNTS_FILE, JSON.stringify(data, null, 2));
+  } catch (error) {
+    console.error(`Error writing to ${ACCOUNTS_FILE}:`, error);
+  }
+}
+
+// --- Volore-Blocks invariant helpers ---
+function getUserBlockCount(data, username) {
+  try {
+    if (!username) return 0;
+    let count = 0;
+    for (const block of data.grid) {
+      if (block && block.dugBy === username) count++;
+    }
+    return count;
+  } catch {
+    return 0;
+  }
+}
+
+function reconcileUserBalanceWithGrid(data, username) {
+  try {
+    if (!username) return;
+    const user = data.users.find(u => u.username === username);
+    if (!user || !user.powPubkey) return;
+    const targetBalance = getUserBlockCount(data, username);
+    const accounts = readAccounts();
+    accounts[user.powPubkey] = { ...(accounts[user.powPubkey] || {}), balance: targetBalance };
+    writeAccounts(accounts);
+  } catch (e) {
+    console.log('reconcileUserBalanceWithGrid error:', e.message);
+  }
+}
+
+function reconcileAllBalancesWithGrid(data) {
+  try {
+    const accounts = readAccounts();
+    for (const user of data.users) {
+      if (!user.powPubkey) continue;
+      const targetBalance = getUserBlockCount(data, user.username);
+      accounts[user.powPubkey] = { ...(accounts[user.powPubkey] || {}), balance: targetBalance };
+    }
+    writeAccounts(accounts);
+  } catch (e) {
+    console.log('reconcileAllBalancesWithGrid error:', e.message);
+  }
+}
+
+function generateRandomHex64() {
+  return crypto.randomBytes(32).toString('hex');
+}
+
+// Admin: assign Volchain pubkeys to users missing one, then reconcile balances
+app.post('/admin/assign-pubkeys', (req, res) => {
+  try {
+    const data = readDB();
+    const existing = new Set(data.users.filter(u => u.powPubkey).map(u => u.powPubkey));
+    let assigned = 0;
+    for (const user of data.users) {
+      if (!user.powPubkey) {
+        let pub;
+        do { pub = generateRandomHex64(); } while (existing.has(pub));
+        user.powPubkey = pub;
+        existing.add(pub);
+        assigned++;
+      }
+    }
+    writeDB(data);
+    reconcileAllBalancesWithGrid(data);
+    res.json({ success: true, assigned });
+  } catch (e) {
+    console.error('assign-pubkeys error:', e);
+    res.status(500).json({ success: false, error: 'failed' });
+  }
+});
+
+// Volchain events log
+const VOLCHAIN_LOG_FILE = path.join(__dirname, 'volchain_log.json');
+
+function readVolchainLog() {
+  try {
+    if (fs.existsSync(VOLCHAIN_LOG_FILE)) {
+      return JSON.parse(fs.readFileSync(VOLCHAIN_LOG_FILE, 'utf8'));
+    }
+  } catch (e) {
+    console.error('readVolchainLog error:', e.message);
+  }
+  return [];
+}
+
+function writeVolchainLog(entries) {
+  try {
+    fs.writeFileSync(VOLCHAIN_LOG_FILE, JSON.stringify(entries, null, 2));
+  } catch (e) {
+    console.error('writeVolchainLog error:', e.message);
+  }
+}
+
+function appendVolchainEvent(evt) {
+  try {
+    const entries = readVolchainLog();
+    entries.unshift({ ts: Date.now(), ...evt });
+    const trimmed = entries.slice(0, 1000);
+    writeVolchainLog(trimmed);
+  } catch (e) {
+    console.error('appendVolchainEvent error:', e.message);
+  }
+}
+
+
+// Volchain: fetch inbox messages for current user and clear them
+app.get('/volchain/inbox', async (req, res) => {
+  try {
+    const sessionToken = req.headers['x-session-token'];
+    const username = await validateSession(sessionToken);
+    if (!username) return res.status(401).json({ error: 'Unauthorized' });
+    const data = readDB();
+    const userIndex = data.users.findIndex(u => u.username === username);
+    if (userIndex === -1) return res.status(404).json({ error: 'User not found' });
+    const inbox = data.users[userIndex].volchainInbox || [];
+    data.users[userIndex].volchainInbox = [];
+    writeDB(data);
+    res.json({ success: true, inbox });
+  } catch (e) {
+    console.error('volchain inbox error:', e);
+    res.status(500).json({ error: 'Internal error' });
+  }
+});
+
+// Volchain: transfer Volore from current user to a pubkey (max available)
+app.post('/volchain/transfer', async (req, res) => {
+  try {
+    const sessionToken = req.headers['x-session-token'];
+    const username = await validateSession(sessionToken);
+    if (!username) return res.status(401).json({ error: 'Unauthorized' });
+
+    const { toPubkey, amount } = req.body || {};
+    if (!toPubkey || typeof toPubkey !== 'string' || !/^[0-9a-fA-F]{64}$/.test(toPubkey)) {
+      return res.status(400).json({ error: 'Invalid destination pubkey' });
+    }
+    const amt = Number(amount);
+    if (!Number.isFinite(amt) || amt <= 0 || Math.floor(amt) !== amt) {
+      return res.status(400).json({ error: 'Invalid amount' });
+    }
+
+    const data = readDB();
+    const sender = data.users.find(u => u.username === username);
+    if (!sender || !sender.powPubkey) return res.status(400).json({ error: 'Sender has no Volchain address' });
+    const receiver = data.users.find(u => u.powPubkey === toPubkey) || null;
+    if (!receiver) {
+      return res.status(400).json({ error: 'Receiver not found' });
+    }
+    if (sender.powPubkey === toPubkey) {
+      return res.status(400).json({ error: 'Self-transfer is not allowed' });
+    }
+
+    // Compute available: total mined blocks - total defense used in gridb
+    const totalBlocks = data.grid.filter(b => b.dugBy === username).length;
+    const gridb = readGridB(data.grid.length);
+    const used = gridb.filter(b => b && b.owner === username).reduce((sum, b) => sum + (typeof b.defense === 'number' ? b.defense : 1), 0);
+    const available = Math.max(0, totalBlocks - used);
+    if (amt > available) return res.status(400).json({ error: 'Amount exceeds available Volore' });
+
+    // Move Digzone blocks: last mined blocks from sender to receiver
+    let remaining = amt;
+    for (let i = data.grid.length - 1; i >= 0 && remaining > 0; i--) {
+      if (data.grid[i].dugBy === username) {
+        data.grid[i].dugBy = receiver.username;
+        if ('visual' in data.grid[i]) data.grid[i].visual = null;
+        remaining--;
+      }
+    }
+    writeDB(data);
+    // Reconcile both balances strictly to grid
+    reconcileUserBalanceWithGrid(data, sender.username);
+    reconcileUserBalanceWithGrid(data, receiver.username);
+    appendVolchainEvent({ type: 'transfer', fromUser: sender.username, from: sender.powPubkey, to: toPubkey, amount: amt });
+
+    // Notify receiver if known
+    const rxIndex = data.users.findIndex(u => u.username === receiver.username);
+    if (rxIndex !== -1) {
+      data.users[rxIndex].volchainInbox = data.users[rxIndex].volchainInbox || [];
+      data.users[rxIndex].volchainInbox.push({
+        ts: Date.now(),
+        type: 'volore_received',
+        from: sender.powPubkey,
+        to: receiver.powPubkey,
+        amount: amt,
+        message: `You received ${amt} Volore from ${sender.powPubkey}`
+      });
+      writeDB(data);
+    }
+
+    // Recompute available after move
+    const totalBlocksAfter = data.grid.filter(b => b.dugBy === username).length;
+    const gridbAfter = readGridB(data.grid.length);
+    const usedAfter = gridbAfter.filter(b => b && b.owner === username).reduce((sum, b) => sum + (typeof b.defense === 'number' ? b.defense : 1), 0);
+    const availableAfter = Math.max(0, totalBlocksAfter - usedAfter);
+    return res.json({ success: true, availableAfter });
+  } catch (e) {
+    console.error('volchain transfer error:', e);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// NOTE: /auth/associate-pow-key is handled by the auth service (port 3002)
+
 // Proxy login requests to auth server
 app.post('/login', async (req, res) => {
   try {
-    const response = await axios.post('http://localhost:3002/login', req.body);
+    const payload = { ...req.body };
+    if (payload && typeof payload.username === 'string') {
+      payload.username = payload.username.trim();
+    }
+    const response = await axios.post('http://localhost:3002/login', payload);
     
     // If login successful, write session to main server's sessions.json
     if (response.data.success && response.data.sessionToken && response.data.username) {
@@ -623,7 +706,11 @@ app.post('/login', async (req, res) => {
 // Proxy signup requests to auth server
 app.post('/signup', async (req, res) => {
   try {
-    const response = await axios.post('http://localhost:3002/signup', req.body);
+    const payload = { ...req.body };
+    if (payload && typeof payload.username === 'string') {
+      payload.username = payload.username.trim();
+    }
+    const response = await axios.post('http://localhost:3002/signup', payload);
     res.json(response.data);
   } catch (error) {
     if (error.response) {
@@ -748,6 +835,7 @@ app.patch('/gridb/:index', async (req, res) => {
       
       // Defense increase is just redistribution - no block loss from GridA
       gridb[blockIndex].defense = (typeof gridb[blockIndex].defense === 'number' ? gridb[blockIndex].defense : 1) + 1;
+
       writeGridB(gridb);
       return res.json(gridb);
     }
@@ -779,6 +867,16 @@ app.patch('/gridb/:index', async (req, res) => {
       const toDelete = attackerBlocks[0];
       db.grid[toDelete._idx].dugBy = null;
       if ('visual' in db.grid[toDelete._idx]) db.grid[toDelete._idx].visual = null;
+      // Reconcile attacker balance with grid and log burn event
+      try {
+        const attacker = db.users.find(u => u.username === username);
+        if (attacker && attacker.powPubkey) {
+          reconcileUserBalanceWithGrid(db, username);
+          appendVolchainEvent({ type: 'burn', reason: 'warzone_attack_cost', username, pubkey: attacker.powPubkey, amount: 1 });
+        }
+      } catch (e) {
+        console.log('Warzone burn (attacker) error:', e.message);
+      }
     }
     
     // Each attack costs defender 1 block too
@@ -792,6 +890,16 @@ app.patch('/gridb/:index', async (req, res) => {
         const toDelete = defenderBlocks[0];
         db.grid[toDelete._idx].dugBy = null;
         if ('visual' in db.grid[toDelete._idx]) db.grid[toDelete._idx].visual = null;
+        // Reconcile defender balance with grid and log burn event
+        try {
+          const defender = db.users.find(u => u.username === prevOwner);
+          if (defender && defender.powPubkey) {
+            reconcileUserBalanceWithGrid(db, prevOwner);
+            appendVolchainEvent({ type: 'burn', reason: 'warzone_defense_loss', username: prevOwner, pubkey: defender.powPubkey, amount: 1 });
+          }
+        } catch (e) {
+          console.log('Warzone burn (defender) error:', e.message);
+        }
       }
     }
     

@@ -3,3 +3,12 @@ node_modules
 .DS_Store
 *.log
 
+frontend/build/
+*.out
+backend/volchain_log.json
+backend/sessions.json
+sessions.json
+frontend/db.json
+frontend/gridb.json
+pow-node/data/accounts.json
+.env

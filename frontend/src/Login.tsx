@@ -80,6 +80,10 @@ const Login: React.FC<Props> = ({ onLogin }) => {
         if (result.sessionToken) {
           localStorage.setItem("session_token", result.sessionToken);
         }
+        try {
+          // Store the login password temporarily for keystore encrypt/decrypt (cleared after use)
+          sessionStorage.setItem('login_password', password);
+        } catch {}
         onLogin(result.username, result.color);
       }
     } catch (error: any) {

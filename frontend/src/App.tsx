@@ -5,22 +5,60 @@ import About from "./About";
 import GridB from "./GridB";
 import BlockchainStats from "./BlockchainStats";
 import MenuDropdownPortal from "./components/MenuDropdownPortal";
+import VolchainActivity from './components/VolchainActivity';
 import "./App.css";
 import "./Mobile.css";
 import "./Modal.css";
+import nacl from 'tweetnacl';
+import { encode, decode as hexDecode } from '@stablelib/hex';
+import VolorePanel from './components/VolorePanel';
+
+// Keystore helpers (AES-GCM PBKDF2)
+function toHex(bytes: Uint8Array): string { return Array.from(bytes).map(b=>b.toString(16).padStart(2,'0')).join(''); }
+function fromHex(hex: string): Uint8Array { const out=new Uint8Array(hex.length/2); for(let i=0;i<hex.length;i+=2) out[i/2]=parseInt(hex.slice(i,i+2),16); return out; }
+async function deriveKeyFromPassword(password: string, salt: Uint8Array) {
+  const enc = new TextEncoder();
+  const keyMaterial = await crypto.subtle.importKey('raw', enc.encode(password), { name:'PBKDF2' }, false, ['deriveKey']);
+  return crypto.subtle.deriveKey({ name:'PBKDF2', salt, iterations:100000, hash:'SHA-256' }, keyMaterial, { name:'AES-GCM', length:256 }, false, ['encrypt','decrypt']);
+}
+async function encryptKeystore(privHex: string, password: string) {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const key = await deriveKeyFromPassword(password, salt);
+  const ct = new Uint8Array(await crypto.subtle.encrypt({ name:'AES-GCM', iv }, key, new TextEncoder().encode(privHex)));
+  return JSON.stringify({ kdf:'pbkdf2-sha256', c:'aes-256-gcm', iv: toHex(iv), salt: toHex(salt), ct: toHex(ct) });
+}
+async function decryptKeystore(keystore: string, password: string) {
+  const data = JSON.parse(keystore);
+  const key = await deriveKeyFromPassword(password, fromHex(data.salt));
+  const plain = await crypto.subtle.decrypt({ name:'AES-GCM', iv: fromHex(data.iv) }, key, fromHex(data.ct));
+  return new TextDecoder().decode(plain);
+}
+
+// Keypair üret (yalnızca ilk kayıt/keystore yoksa)
+function generateKeypair() {
+  const kp = nacl.sign.keyPair();
+  const pubHex = encode(kp.publicKey);
+  const privHex = encode(kp.secretKey);
+  localStorage.setItem('user_pubkey', pubHex);
+  localStorage.setItem('user_privkey', privHex);
+  return { pubHex, privHex };
+}
 
 const App: React.FC = () => {
   const [username, setUsername] = useState<string | null>(null);
   const [userColor, setUserColor] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState<boolean>(false);
   const [showAbout, setShowAbout] = useState<boolean>(false);
-  const [showTokenomics, setShowTokenomics] = useState<boolean>(false);
   const [showContactUs, setShowContactUs] = useState<boolean>(false);
 
   const [showMenu, setShowMenu] = useState<boolean>(false);
   const [showGridB, setShowGridB] = useState<boolean>(false);
   const [showBlockchainStats, setShowBlockchainStats] = useState<boolean>(false);
+  const [showVolore, setShowVolore] = useState<boolean>(false);
   const [tokenBalance, setTokenBalance] = useState<number>(0);
+  const [showVolchainActivity, setShowVolchainActivity] = useState<boolean>(false);
+  const [serverPowPub, setServerPowPub] = useState<string>('');
   const [blockData, setBlockData] = useState<any[]>([]);
 
 
@@ -32,7 +70,6 @@ const App: React.FC = () => {
   const [confirmPassword, setConfirmPassword] = useState<string>("");
   const [selectedColor, setSelectedColor] = useState<string | null>(userColor);
   const [newUsername, setNewUsername] = useState<string>("");
-  const [walletAddress, setWalletAddress] = useState<string>("");
   
   // Contact Us form states
   const [contactName, setContactName] = useState<string>("");
@@ -40,27 +77,149 @@ const App: React.FC = () => {
   const [contactMessage, setContactMessage] = useState<string>("");
 
   useEffect(() => {
+    try {
+      const hasPub = !!localStorage.getItem('user_pubkey');
+      const hasPriv = !!localStorage.getItem('user_privkey');
+      if (!hasPub || !hasPriv) {
+        generateKeypair();
+      }
+    } catch {}
+  }, []);
+
+  useEffect(() => {
     const storedName = localStorage.getItem("username");
     if (storedName) {
       setUsername(storedName);
       const savedColor = localStorage.getItem(`color_${storedName}`);
       if (savedColor) setUserColor(savedColor);
-      const savedWallet = localStorage.getItem(`wallet_${storedName}`);
-      if (savedWallet) setWalletAddress(savedWallet);
+      // legacy wallet storage ignored
     }
   }, []);
 
-  // When the user logs in or the username changes, fetch walletAddress from backend and save to localStorage
+  // When the user logs in: restore or save keystore (silent with login password)
   useEffect(() => {
     if (username) {
-      fetch(`/auth/user?username=${username}`)
-        .then(res => res.json())
-        .then(user => {
-          if (user.walletAddress) {
-            localStorage.setItem(`wallet_${username}`, user.walletAddress);
-            setWalletAddress(user.walletAddress);
-          }
-        });
+      const sessionToken = localStorage.getItem('session_token');
+      if (sessionToken) {
+        fetch('/auth/keystore', { headers: { 'X-Session-Token': sessionToken } })
+          .then(res => res.json())
+          .then(async (resp) => {
+            const serverKeystore = resp?.powKeystore as string | null;
+            const serverPub = resp?.powPubkey as string | null;
+            if (serverPub) setServerPowPub(serverPub);
+            const localPub = localStorage.getItem('user_pubkey');
+            const localPriv = localStorage.getItem('user_privkey');
+
+            // If server has keystore and local is missing wallet: restore using login password silently
+            if (serverKeystore && (!localPub || !localPriv)) {
+              const pw = sessionStorage.getItem('login_password') || '';
+              if (pw) {
+                try {
+                  const privHex = await decryptKeystore(serverKeystore, pw);
+                  const sk = hexDecode(privHex);
+                  const pubBytes = nacl.sign.keyPair.fromSecretKey(Uint8Array.from(sk)).publicKey;
+                  const pubHex = encode(pubBytes);
+                  if (!serverPub || serverPub === pubHex) {
+                    localStorage.setItem('user_pubkey', pubHex);
+                    localStorage.setItem('user_privkey', privHex);
+                    console.log('Wallet restored on this device.');
+                  } else {
+                    // Prefer server side key: adopt server pub and decrypted priv
+                    localStorage.setItem('user_pubkey', serverPub);
+                    localStorage.setItem('user_privkey', privHex);
+                    console.warn('Local wallet mismatched; adopted server wallet.');
+                  }
+                } catch {
+                  console.warn('Failed to decrypt wallet with login password.');
+                }
+              }
+            }
+
+            // If both exist but differ: prefer server version when we can verify by decrypting
+            if (serverKeystore && serverPub && localPub && localPriv && localPub !== serverPub) {
+              try {
+                const pw = sessionStorage.getItem('login_password') || '';
+                if (pw) {
+                  const privHex = await decryptKeystore(serverKeystore, pw);
+                  const sk = hexDecode(privHex);
+                  const derivedPub = encode(nacl.sign.keyPair.fromSecretKey(Uint8Array.from(sk)).publicKey);
+                  if (derivedPub === serverPub) {
+                    localStorage.setItem('user_pubkey', serverPub);
+                    localStorage.setItem('user_privkey', privHex);
+                    console.warn('Local wallet updated to match server.');
+                  }
+                }
+              } catch {}
+            }
+
+            // First-time: no keystore on server (encrypt with login password silently)
+            if (!serverKeystore) {
+              let pub = localStorage.getItem('user_pubkey');
+              let priv = localStorage.getItem('user_privkey');
+              if (!pub || !priv) {
+                const kp = generateKeypair();
+                pub = kp.pubHex; priv = kp.privHex;
+                try {
+                  await fetch('/auth/associate-pow-key', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-Session-Token': sessionToken },
+                    body: JSON.stringify({ powPubkey: pub })
+                  });
+                } catch {}
+              }
+              const setPw = sessionStorage.getItem('login_password') || '';
+              if (setPw) {
+                try {
+                  const ks = await encryptKeystore(priv!, setPw);
+                  await fetch('/auth/save-keystore', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-Session-Token': sessionToken },
+                    body: JSON.stringify({ powKeystore: ks, powPubkey: pub })
+                  });
+                } catch {}
+              }
+            }
+
+            // If serverPub missing or invalid (placeholder/dummy) but we have a valid local pub, associate it now
+            const isPlaceholder = (hex: string) => !!hex && (/^0{64}$/.test(hex) || /^([0-9a-fA-F]{16})\1\1\1$/.test(hex));
+            if ((!serverPub || !/^[0-9a-fA-F]{64}$/.test(serverPub) || isPlaceholder(serverPub)) && localPub && /^[0-9a-fA-F]{64}$/.test(localPub)) {
+              try {
+                await fetch('/auth/associate-pow-key', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', 'X-Session-Token': sessionToken },
+                  body: JSON.stringify({ powPubkey: localPub })
+                });
+                setServerPowPub(localPub);
+              } catch {}
+            }
+
+            // If both server and local pubkeys are invalid/placeholder: generate new locally and associate
+            if ((!serverPub || isPlaceholder(serverPub) || !/^[0-9a-fA-F]{64}$/.test(serverPub)) && (!localPub || isPlaceholder(localPub) || !/^[0-9a-fA-F]{64}$/.test(localPub))) {
+              try {
+                const kp = generateKeypair();
+                await fetch('/auth/associate-pow-key', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', 'X-Session-Token': sessionToken },
+                  body: JSON.stringify({ powPubkey: kp.pubHex })
+                });
+                setServerPowPub(kp.pubHex);
+                const setPw = sessionStorage.getItem('login_password') || '';
+                if (setPw) {
+                  const ks = await encryptKeystore(kp.privHex, setPw);
+                  await fetch('/auth/save-keystore', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-Session-Token': sessionToken },
+                    body: JSON.stringify({ powKeystore: ks, powPubkey: kp.pubHex })
+                  });
+                }
+              } catch {}
+            }
+          })
+          .catch(() => {});
+      }
+
+      fetch(`/auth/user?username=${username}`).catch(() => {});
+      try { sessionStorage.removeItem('login_password'); } catch {}
     }
   }, [username]);
 
@@ -73,9 +232,16 @@ const App: React.FC = () => {
         .then(user => {
           setUserEmail(user.email);
           setSelectedColor(user.color);
-  
-          setWalletAddress(user.walletAddress || "");
         });
+      fetch(`/stats/volchain?username=${encodeURIComponent(username)}`)
+        .then(res => res.json())
+        .then(v => {
+          const serverPubFromStats = v?.volchain?.currentUser?.pubkey || '';
+          if (/^[0-9a-fA-F]{64}$/.test(serverPubFromStats)) {
+            setServerPowPub(serverPubFromStats);
+          }
+        })
+        .catch(() => {});
     }
   }, [showSettings, username]);
 
@@ -94,7 +260,6 @@ const App: React.FC = () => {
       setUserColor(null);
       setShowSettings(false);
       setShowAbout(false);
-      setShowTokenomics(false);
       setShowContactUs(false);
 
       setShowMenu(false);
@@ -118,11 +283,57 @@ const App: React.FC = () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username, currentPassword, newPassword }),
       });
-      const result = await response.json();
+      const _result = await response.json();
       if (!response.ok) {
-        alert(result.error || "Password change failed");
+        alert(_result.error || "Password change failed");
         return;
       }
+      // After password change, re-encrypt keystore with new password and save
+      try {
+        const sessionToken = localStorage.getItem('session_token');
+        if (sessionToken) {
+          let pubHex = localStorage.getItem('user_pubkey') || '';
+          let privHex = localStorage.getItem('user_privkey') || '';
+          if (!privHex) {
+            // Try get server keystore and decrypt with OLD password
+            const ksResp = await fetch('/auth/keystore', { headers: { 'X-Session-Token': sessionToken } });
+            const ksJson = await ksResp.json();
+            const serverKeystore = ksJson?.powKeystore as string | null;
+            const serverPub = ksJson?.powPubkey as string | null;
+            if (serverKeystore) {
+              try {
+                const decrypted = await decryptKeystore(serverKeystore, currentPassword);
+                privHex = decrypted;
+                const sk = hexDecode(privHex);
+                const pubBytes = nacl.sign.keyPair.fromSecretKey(Uint8Array.from(sk)).publicKey;
+                const derivedPub = encode(pubBytes);
+                if (!pubHex) pubHex = derivedPub;
+                if (!serverPub || serverPub === derivedPub) {
+                  localStorage.setItem('user_pubkey', derivedPub);
+                  localStorage.setItem('user_privkey', privHex);
+                }
+              } catch {
+                console.warn('Keystore decrypt with old password failed; skipping re-encrypt');
+              }
+            }
+          }
+          if (privHex && pubHex) {
+            try {
+              const newKs = await encryptKeystore(privHex, newPassword);
+              await fetch('/auth/save-keystore', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-Session-Token': sessionToken },
+                body: JSON.stringify({ powKeystore: newKs, powPubkey: pubHex })
+              });
+            } catch (e) {
+              console.warn('Failed to save re-encrypted keystore:', e);
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('Post-change keystore update failed:', e);
+      }
+
       alert("Password changed successfully");
       setCurrentPassword("");
       setNewPassword("");
@@ -153,9 +364,9 @@ const App: React.FC = () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username, color: selectedColor }),
       });
-      const result = await response.json();
+      const json = await response.json();
       if (!response.ok) {
-        alert(result.error || "Color update failed");
+        alert(json?.error || "Color update failed");
         return;
       }
       alert("Color updated successfully");
@@ -223,7 +434,7 @@ const App: React.FC = () => {
         alert("Username update failed: " + text);
         return;
       }
-      const result = await response.json();
+      await response.json();
       // Oturumu sıfırla ve kullanıcıyı logout et
       localStorage.removeItem("username");
       localStorage.removeItem(`color_${username}`);
@@ -232,7 +443,6 @@ const App: React.FC = () => {
       setUserColor(null);
       setShowSettings(false);
       setShowAbout(false);
-      setShowTokenomics(false);
       setShowContactUs(false);
       setShowMenu(false);
       setShowGridB(false);
@@ -245,6 +455,8 @@ const App: React.FC = () => {
       alert(`Username update error: ${error.message}`);
     }
   };
+
+  // Volchain Live page removed
 
   return (
     <div className="app-container">
@@ -270,7 +482,8 @@ const App: React.FC = () => {
         open={showMenu}
         onInfo={() => { setShowAbout(true); setShowMenu(false); }}
         onSettings={() => { setShowSettings(true); setShowMenu(false); }}
-        onTokenomics={() => { setShowTokenomics(true); setShowMenu(false); }}
+        onVolore={() => { setShowVolore(true); setShowMenu(false); }}
+        onVolchainActivity={() => { setShowVolchainActivity(true); setShowMenu(false); }}
         onContact={() => { setShowContactUs(true); setShowMenu(false); }}
         onLogout={() => { handleLogout(); setShowMenu(false); }}
       />
@@ -307,7 +520,7 @@ const App: React.FC = () => {
                 <button
                   onClick={() => setShowBlockchainStats(true)}
                   className="action-button blockchain-stats-button"
-                  aria-label="Blockchain Stats"
+                  aria-label="Volchain Stats"
                   style={{
                     background: 'linear-gradient(135deg, #4CAF50 0%, #45a049 100%)',
                     color: 'white',
@@ -315,8 +528,9 @@ const App: React.FC = () => {
                     fontWeight: 'bold',
                   }}
                 >
-                  🔗 Blockchain Stats
+                  🔗 Volchain Stats
                 </button>
+                {/* Volchain Live link removed */}
               </div>
             </>
           )}
@@ -442,68 +656,30 @@ const App: React.FC = () => {
                   </button>
                 </div>
                 <div className="form-group">
-                  <label>Wallet Address:</label>
+                  <label>Volchain Address (Server):</label>
                   <input
                     className="settings-input"
                     type="text"
-                    value={walletAddress}
-                    onChange={(e) => setWalletAddress(e.target.value)}
-                    placeholder="Enter wallet address"
+                    value={serverPowPub || localStorage.getItem('user_pubkey') || ''}
+                    readOnly
+                    placeholder="Your Volchain address will appear here"
                   />
-                  <button className="settings-button" onClick={async () => {
-                    if (!walletAddress) {
-                      alert("Please enter a wallet address.");
-                      return;
-                    }
-                    try {
-                                           const response = await fetch(`/auth/update-wallet`, {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ username, walletAddress }),
-                      });
-                      const result = await response.json();
-                      if (!response.ok || result.error) {
-                        alert(result.error || "Wallet update failed");
-                                           } else {
-                         alert("Wallet address updated successfully");
-                         localStorage.setItem(`wallet_${username}`, walletAddress);
-                         // Don't clear input after update, keep the current value
-                       }
-                    } catch (error) {
-                      alert("An error occurred: " + error);
-                    }
-                  }}>
-                    Update Wallet
+                  <button
+                    type="button"
+                    className="settings-button"
+                    style={{ marginTop: 8 }}
+                    onClick={async () => {
+                      const v = serverPowPub || localStorage.getItem('user_pubkey') || '';
+                      if (!v) return;
+                      try { await navigator.clipboard.writeText(v); alert('Address copied'); } catch {}
+                    }}
+                    aria-label="Copy Volchain address"
+                    title="Copy Volchain address"
+                  >
+                    ⧉ Copy
                   </button>
                 </div>
-                <button
-                  className="settings-button"
-                  style={{ backgroundColor: '#2196f3', marginTop: 12 }}
-                  onClick={async () => {
-                    if (!window.confirm("Are you sure you want to reset your warzone blocks? This will also remove the same amount from your digzone.")) return;
-                    try {
-                      const response = await fetch(`${process.env.REACT_APP_API_BASE || ""}/reset-tokens`, {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({
-                          username,
-                          walletAddress: localStorage.getItem(`wallet_${username}`) || "",
-                        }),
-                      });
-                      const result = await response.json();
-                      if (!response.ok || result.error) {
-                        alert(result.error || "Block reset or token transfer failed");
-                      } else {
-                        alert(`${result.resetCount} warzone blocks reset, ${result.resetCount} THET earned!\nDigzone blocks also reduced by ${result.resetCount}.\nTransaction: ${result.rewardSignature || "-"}`);
-                        window.location.reload();
-                      }
-                    } catch (error) {
-                      alert("An error occurred: " + error);
-                    }
-                  }}
-                >
-                  Reset Warzone
-                </button>
+                
 
               </div>
             </div>
@@ -511,15 +687,15 @@ const App: React.FC = () => {
         )}
       </div>
       
-      {/* Tokenomics Modal */}
-      {showTokenomics && (
+      {/* Tokenomics removed */}
+      {false && (
         <div className="settings-modal">
           <div className="settings-content">
             <div className="modal-header">
               <h3 className="modal-title">💰 THET Tokenomics</h3>
               <button 
                 className="modal-close-x" 
-                onClick={() => setShowTokenomics(false)}
+                onClick={() => {}}
                 aria-label="Close"
               >
                 ×
@@ -684,6 +860,35 @@ const App: React.FC = () => {
         onClose={() => setShowBlockchainStats(false)}
         username={username}
       />
+      {/* Volore Modal */}
+      {showVolore && (
+        <div className="settings-modal" onClick={() => setShowVolore(false)}>
+          <div className="settings-content" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3 className="modal-title">💰 Volore</h3>
+              <button className="modal-close-x" onClick={() => setShowVolore(false)} aria-label="Close">×</button>
+            </div>
+            <div className="modal-body">
+              <VolorePanel username={username} />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Volchain Activity Modal */}
+      {showVolchainActivity && (
+        <div className="settings-modal" onClick={() => setShowVolchainActivity(false)}>
+          <div className="settings-content" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3 className="modal-title">🧾 Volchain Activity</h3>
+              <button className="modal-close-x" onClick={() => setShowVolchainActivity(false)} aria-label="Close">×</button>
+            </div>
+            <div className="modal-body">
+              <VolchainActivity autoRefreshMs={30000} />
+            </div>
+          </div>
+        </div>
+      )}
       
 
     </div>

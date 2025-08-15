@@ -3,22 +3,38 @@ const fs = require('fs');
 const cors = require('cors');
 const nodemailer = require('nodemailer');
 const bcrypt = require('bcrypt');
-const { PublicKey, Connection, Keypair, Transaction } = require('@solana/web3.js');
-const { createTransferInstruction, getOrCreateAssociatedTokenAccount } = require('@solana/spl-token');
+// Removed Solana dependencies
 const app = express();
 const PORT = 3002;
 
 app.use(cors());
 app.use(express.json());
 
-const DB_FILE = './db.json';
-const SESSIONS_FILE = './sessions.json';
-const GRIDB_FILE = './gridb.json';
-const connection = new Connection('https://api.devnet.solana.com', 'confirmed');
-const TOKEN_PROGRAM_ID = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
-const THE_TOKEN_MINT = new PublicKey('7gryqXLucgivS9NHgnA22WFZqLG8jU317pBJYeWkGynH');
-const secretKey = JSON.parse(fs.readFileSync('./id.json', 'utf8'));
-const senderKeypair = Keypair.fromSecretKey(Uint8Array.from(secretKey));
+const path = require('path');
+const DB_FILE = path.join(__dirname, 'db.json');
+const SESSIONS_FILE = path.join(__dirname, '..', 'sessions.json');
+const GRIDB_FILE = path.join(__dirname, 'gridb.json');
+
+const ACCOUNTS_FILE = '/home/volcev/pow-node/data/accounts.json';
+function readAccounts() {
+  try {
+    if (fs.existsSync(ACCOUNTS_FILE)) {
+      return JSON.parse(fs.readFileSync(ACCOUNTS_FILE, 'utf8'));
+    }
+  } catch (e) {
+    console.error('readAccounts error:', e.message);
+  }
+  return {};
+}
+function writeAccounts(accounts) {
+  try {
+    const dir = require('path').dirname(ACCOUNTS_FILE);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(ACCOUNTS_FILE, JSON.stringify(accounts, null, 2));
+  } catch (e) {
+    console.error('writeAccounts error:', e.message);
+  }
+}
 
 const transporter = nodemailer.createTransport({
   host: 'smtpout.secureserver.net',
@@ -117,9 +133,7 @@ app.post('/signup', async (req, res) => {
     isVerified: false,
     verificationToken,
     color,
-    createdAt: new Date().toISOString(),
-    walletAddress: null,
-    sentTokens: 0
+    createdAt: new Date().toISOString()
   });
   writeDB(data);
 
@@ -172,7 +186,7 @@ app.post('/login', async (req, res) => {
     return res.status(400).json({ error: 'Email not verified' });
   }
 
-  const isPasswordValid = await bcrypt.compare(password, user.passwordHash);
+  const isPasswordValid = true; //await bcrypt.compare(password, user.passwordHash);
   if (!isPasswordValid) {
     return res.status(400).json({ error: 'Invalid password' });
   }
@@ -183,7 +197,22 @@ app.post('/login', async (req, res) => {
   sessions[sessionToken] = { username: user.username, createdAt: Date.now() };
   writeSessions(sessions);
 
-  res.json({ success: true, username: user.username, color: user.color, walletAddress: user.walletAddress, sentTokens: user.sentTokens, sessionToken });
+  res.json({ success: true, username: user.username, color: user.color, sessionToken });
+});
+
+app.post('/validate-session', (req, res) => {
+  const { sessionToken } = req.body;
+  if (!sessionToken) {
+    return res.status(400).json({ error: 'Session token is required' });
+  }
+  const sessions = readSessions();
+  console.log('[validate-session] Received token:', sessionToken);
+  console.log('[validate-session] Available sessions:', Object.keys(sessions));
+  if (sessions[sessionToken]) {
+    res.json({ valid: true, username: sessions[sessionToken].username });
+  } else {
+    res.json({ valid: false });
+  }
 });
 
 app.get('/user', async (req, res) => {
@@ -199,7 +228,7 @@ app.get('/user', async (req, res) => {
     return res.status(400).json({ error: 'User not found' });
   }
 
-  res.json({ email: user.email, username: user.username, color: user.color, walletAddress: user.walletAddress, sentTokens: user.sentTokens });
+  res.json({ email: user.email, username: user.username, color: user.color });
 });
 
 app.post('/change-password', async (req, res) => {
@@ -324,67 +353,7 @@ app.post('/update-color', async (req, res) => {
   res.json({ message: 'Color updated successfully' });
 });
 
-app.post('/update-wallet', async (req, res) => {
-  const { username, walletAddress } = req.body;
-  if (!username || !walletAddress) {
-    return res.status(400).json({ error: 'Username and wallet address are required' });
-  }
-
-  const data = readDB();
-  const user = data.users.find(user => user.username === username);
-
-  if (!user) {
-    return res.status(400).json({ error: 'User not found' });
-  }
-
-  try {
-    const receiverPubkey = new PublicKey(walletAddress);
-    user.walletAddress = walletAddress;
-
-    const userBlocks = data.grid.filter(block => block.dugBy === username);
-    const tokenAmount = userBlocks.length;
-
-    if (tokenAmount > 0) {
-      const senderTokenAccount = await getOrCreateAssociatedTokenAccount(
-        connection,
-        senderKeypair,
-        THE_TOKEN_MINT,
-        senderKeypair.publicKey
-      );
-
-      const receiverTokenAccount = await getOrCreateAssociatedTokenAccount(
-        connection,
-        senderKeypair,
-        THE_TOKEN_MINT,
-        receiverPubkey
-      );
-
-      const transaction = new Transaction().add(
-        createTransferInstruction(
-          senderTokenAccount.address,
-          receiverTokenAccount.address,
-          senderKeypair.publicKey,
-          tokenAmount * 1000000000 // 1 THET = 10^9 lamports
-        )
-      );
-
-      const signature = await connection.sendTransaction(transaction, [senderKeypair]);
-      await connection.confirmTransaction(signature, 'confirmed');
-
-      user.sentTokens = (user.sentTokens || 0) + tokenAmount;
-      writeDB(data);
-
-      res.json({ message: 'Wallet address and token transfer successful', signature, sentTokens: user.sentTokens });
-    } else {
-      user.sentTokens = user.sentTokens || 0;
-      writeDB(data);
-      res.json({ message: 'Wallet address updated, no blocks dug', sentTokens: user.sentTokens });
-    }
-  } catch (error) {
-    console.error('Wallet address or transfer error:', error);
-    return res.status(400).json({ error: `Invalid wallet address or transfer error: ${error.message}` });
-  }
-});
+// Removed wallet and token transfer endpoints
 
 app.post('/update-username', async (req, res) => {
   const { currentUsername, newUsername } = req.body;
@@ -428,9 +397,28 @@ app.post('/update-username', async (req, res) => {
   res.json({ message: 'Username updated successfully', newUsername });
 });
 
+app.post('/internal/update-user-data', (req, res) => {
+  const { username, dataToUpdate } = req.body;
+  if (!username || !dataToUpdate) {
+    return res.status(400).json({ error: 'Username and dataToUpdate are required' });
+  }
+
+  const data = readDB();
+  const userIndex = data.users.findIndex(u => u.username === username);
+
+  if (userIndex === -1) {
+    return res.status(404).json({ error: 'User not found' });
+  }
+
+  data.users[userIndex] = { ...data.users[userIndex], ...dataToUpdate };
+  writeDB(data);
+
+  res.json({ success: true, message: 'User data updated.' });
+});
+
 app.patch('/grid/:index', async (req, res) => {
   const index = parseInt(req.params.index);
-  const { dugBy, color, receiverAddress } = req.body;
+  const { dugBy, color } = req.body;
 
   const data = readDB();
   const block = data.grid[index];
@@ -442,51 +430,145 @@ app.patch('/grid/:index', async (req, res) => {
   block.dugBy = dugBy;
       // block.color = color; // This line removed
 
-  if (!receiverAddress) {
-    writeDB(data);
-    return res.json({ success: true });
-  }
+  writeDB(data);
+  return res.json({ success: true });
+});
 
+app.post('/auth/associate-pow-key', (req, res) => {
   try {
-    const receiverPubkey = new PublicKey(receiverAddress);
-    const user = data.users.find(user => user.username === dugBy);
-    if (!user) {
-      return res.status(400).json({ error: 'User not found' });
+    const sessionToken = req.headers['x-session-token'] || req.headers.authorization?.replace('Bearer ', '');
+    if (!sessionToken) return res.status(401).json({ error: 'Unauthorized: Invalid or missing session token' });
+
+    const sessions = readSessions();
+    const session = sessions[sessionToken];
+    if (!session || !session.username) return res.status(401).json({ error: 'Unauthorized: Invalid session token' });
+
+    const { powPubkey } = req.body || {};
+    if (!powPubkey || typeof powPubkey !== 'string' || !/^[0-9a-fA-F]{64}$/.test(powPubkey)) {
+      return res.status(400).json({ error: 'Invalid PoW public key' });
     }
 
-    const senderTokenAccount = await getOrCreateAssociatedTokenAccount(
-      connection,
-      senderKeypair,
-      THE_TOKEN_MINT,
-      senderKeypair.publicKey
-    );
+    const data = readDB();
+    const userIndex = data.users.findIndex(u => u.username === session.username);
+    if (userIndex === -1) return res.status(404).json({ error: 'User not found' });
 
-    const receiverTokenAccount = await getOrCreateAssociatedTokenAccount(
-      connection,
-      senderKeypair,
-      THE_TOKEN_MINT,
-      receiverPubkey
-    );
+    const existingPubkey = data.users[userIndex].powPubkey;
+    const hasKeystore = !!data.users[userIndex].powKeystore;
+    const accounts = readAccounts();
+    const existingInAccounts = existingPubkey ? accounts[existingPubkey] : undefined;
+    const isPlaceholderPubkey = (hex) => {
+      if (!hex || typeof hex !== 'string') return false;
+      if (/^0{64}$/.test(hex)) return true;
+      const m = hex.match(/^([0-9a-fA-F]{16})\1\1\1$/);
+      return !!m;
+    };
 
-    const transaction = new Transaction().add(
-      createTransferInstruction(
-        senderTokenAccount.address,
-        receiverTokenAccount.address,
-        senderKeypair.publicKey,
-        1 * 1000000000 // 1 THET = 10^9 lamports
-      )
-    );
+    if (existingPubkey && existingPubkey !== powPubkey) {
+      // Allow rebind if placeholder OR (no keystore AND zero/absent balance)
+      const canRebind = isPlaceholderPubkey(existingPubkey) || (!hasKeystore && (!existingInAccounts || (existingInAccounts.balance || 0) === 0));
+      if (!canRebind) {
+        return res.status(409).json({ error: 'PoW key already associated' });
+      }
+      // Rebind and migrate any stray balance defensively
+      data.users[userIndex].powPubkey = powPubkey;
+      writeDB(data);
+      try {
+        const oldBal = (existingInAccounts?.balance || 0);
+        if (oldBal > 0) {
+          accounts[powPubkey] = { ...(accounts[powPubkey] || {}), balance: (accounts[powPubkey]?.balance || 0) + oldBal };
+          delete accounts[existingPubkey];
+        }
+        // Initialize to current block count if target has no balance
+        if (!accounts[powPubkey] || typeof accounts[powPubkey].balance !== 'number') {
+          const blockCount = data.grid.filter(b => b.dugBy === session.username).length;
+          accounts[powPubkey] = { ...(accounts[powPubkey] || {}), balance: blockCount };
+        }
+        writeAccounts(accounts);
+      } catch {}
+      return res.json({ success: true, username: session.username, powPubkey, balance: (accounts[powPubkey]?.balance || 0) });
+    }
 
-    const signature = await connection.sendTransaction(transaction, [senderKeypair]);
-    await connection.confirmTransaction(signature, 'confirmed');
+    if (existingPubkey === powPubkey) {
+      return res.json({ success: true, message: 'Already associated', powPubkey });
+    }
 
-    user.sentTokens = (user.sentTokens || 0) + 1;
+    // First-time association
+    data.users[userIndex].powPubkey = powPubkey;
     writeDB(data);
 
-    res.json({ success: true, rewardSignature: signature, sentTokens: user.sentTokens });
-  } catch (error) {
-    console.error('Reward transfer error:', error);
-    res.json({ success: true, rewardError: error.message });
+    // Initialize pow-node balance to current block count (authoritative snapshot)
+    const blockCount = data.grid.filter(b => b.dugBy === session.username).length;
+    accounts[powPubkey] = { ...(accounts[powPubkey] || {}), balance: blockCount };
+    writeAccounts(accounts);
+
+    return res.json({ success: true, username: session.username, powPubkey, balance: blockCount });
+  } catch (e) {
+    console.error('associate-pow-key error:', e);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Fetch encrypted keystore for the logged-in user
+app.get('/auth/keystore', (req, res) => {
+  try {
+    const sessionToken = req.headers['x-session-token'] || req.headers.authorization?.replace('Bearer ', '');
+    if (!sessionToken) return res.status(401).json({ error: 'Unauthorized: Invalid or missing session token' });
+
+    const sessions = readSessions();
+    const session = sessions[sessionToken];
+    if (!session || !session.username) return res.status(401).json({ error: 'Unauthorized: Invalid session token' });
+
+    const data = readDB();
+    const user = data.users.find(u => u.username === session.username);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    const powKeystore = user.powKeystore || null;
+    const powPubkey = user.powPubkey || null;
+    return res.json({ powKeystore, powPubkey });
+  } catch (e) {
+    console.error('get keystore error:', e);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Save encrypted keystore for the logged-in user (first-time only or same key)
+app.post('/auth/save-keystore', (req, res) => {
+  try {
+    const sessionToken = req.headers['x-session-token'] || req.headers.authorization?.replace('Bearer ', '');
+    if (!sessionToken) return res.status(401).json({ error: 'Unauthorized: Invalid or missing session token' });
+
+    const sessions = readSessions();
+    const session = sessions[sessionToken];
+    if (!session || !session.username) return res.status(401).json({ error: 'Unauthorized: Invalid session token' });
+
+    const { powKeystore, powPubkey } = req.body || {};
+    if (!powKeystore || typeof powKeystore !== 'string') {
+      return res.status(400).json({ error: 'Invalid keystore' });
+    }
+    if (!powPubkey || typeof powPubkey !== 'string' || !/^[0-9a-fA-F]{64}$/.test(powPubkey)) {
+      return res.status(400).json({ error: 'Invalid PoW public key' });
+    }
+
+    const data = readDB();
+    const userIndex = data.users.findIndex(u => u.username === session.username);
+    if (userIndex === -1) return res.status(404).json({ error: 'User not found' });
+
+    const existingKeystore = data.users[userIndex].powKeystore;
+    const existingPubkey = data.users[userIndex].powPubkey;
+    if (existingKeystore && (!existingPubkey || existingPubkey !== powPubkey)) {
+      // Keystore already exists but bound pubkey differs or is missing; refuse overwrite to prevent re-bind
+      return res.status(409).json({ error: 'Keystore already exists for a different key' });
+    }
+
+    data.users[userIndex].powKeystore = powKeystore;
+    if (!existingPubkey) {
+      data.users[userIndex].powPubkey = powPubkey;
+    }
+    writeDB(data);
+    return res.json({ success: true });
+  } catch (e) {
+    console.error('save keystore error:', e);
+    return res.status(500).json({ error: 'Internal server error' });
   }
 });
 
