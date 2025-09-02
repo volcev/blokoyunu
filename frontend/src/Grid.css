@@ -291,6 +291,32 @@
 }
 
 /* ======================================
+   DIGZONE & WARZONE VISUAL SEPARATION
+   ====================================== */
+
+.digzone-block {
+  position: relative;
+}
+
+.digzone-block::before { content: ""; }
+
+.warzone-block {
+  position: relative;
+}
+
+.warzone-block::before { content: ""; }
+
+/* Mobile'da iconları küçült */
+@media (max-width: 600px) {
+  .digzone-block::before,
+  .warzone-block::before {
+    font-size: 6px;
+    top: 1px;
+    right: 1px;
+  }
+}
+
+/* ======================================
    BLOCK TOOLTIP
    ====================================== */
 .block-tooltip {

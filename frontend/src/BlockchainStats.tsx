@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import './BlockchainStats.css';
+import { withRetry } from './components/request';
 
 interface BlockchainStatsProps {
   isVisible: boolean;
@@ -39,8 +40,9 @@ interface GameStats {
 
 interface StatsResponse {
   success: boolean;
-  stats: GameStats;
-  source: 'blockchain' | 'local_fallback' | 'local';
+  grid: GameStats;
+  source: string;
+  volchain?: { totalSupply: number; currentUser?: { balance?: number } };
 }
 
 const BlockchainStats: React.FC<BlockchainStatsProps> = ({ isVisible, onClose, username }) => {
@@ -49,20 +51,47 @@ const BlockchainStats: React.FC<BlockchainStatsProps> = ({ isVisible, onClose, u
   const [loading, setLoading] = useState(false);
   const [source, setSource] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
+  const [holders, setHolders] = useState<Array<{ name: string; balance: number; color: string; pubkey: string }>>([]);
+  const [chainTotal, setChainTotal] = useState<number>(0);
+  const [chainUserBalance, setChainUserBalance] = useState<number>(0);
+  const [isSyncing, setIsSyncing] = useState<boolean>(false);
 
   const fetchStats = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
       const url = username 
-        ? `/stats/blockchain?username=${encodeURIComponent(username)}`
-        : '/stats/blockchain';
-      const response = await fetch(url);
-      const data: StatsResponse = await response.json();
+        ? `/stats/volchain?username=${encodeURIComponent(username)}`
+        : '/stats/volchain';
+      const [statsResp, holdersResp] = await Promise.all([
+        withRetry(url, { method: 'GET' }, 1),
+        withRetry('/volchain/holders?limit=3', { method: 'GET' }, 1)
+      ]);
+      const data: StatsResponse = await statsResp.json();
+      if (Array.isArray(holdersResp)) {
+        // no-op (type guard)
+      }
+      const holdersJson = await holdersResp.json().catch(() => []);
+      if (Array.isArray(holdersJson)) {
+        setHolders(holdersJson.map((h: any) => ({
+          name: h?.name || (typeof h?.pubkey === 'string' ? h.pubkey.slice(0,8) : ''),
+          balance: Number(h?.balance) || 0,
+          color: h?.color || '#e0e0e0',
+          pubkey: h?.pubkey || ''
+        })));
+      } else {
+        setHolders([]);
+      }
       
       if (data.success) {
-        setStats(data.stats);
-        setSource(data.source === 'blockchain' ? '🔗 Volchain' : '💾 Local');
+        setStats(data.grid);
+        setSource(data.source === 'volchain' ? '🔗 Volchain' : '💾 Local');
+        const vt = Number(data?.volchain?.totalSupply || 0);
+        setChainTotal(vt);
+        const ub = Number(data?.volchain?.currentUser?.balance || 0);
+        setChainUserBalance(ub);
+        const minedBlocks = Number(data?.grid?.minedBlocks || 0);
+        setIsSyncing(vt > 0 && minedBlocks >= 0 && vt !== minedBlocks);
       } else {
         setError('Failed to fetch stats');
       }
@@ -72,13 +101,36 @@ const BlockchainStats: React.FC<BlockchainStatsProps> = ({ isVisible, onClose, u
     } finally {
       setLoading(false);
     }
-  }, [username, setLoading, setError, setStats, setSource]);
+  }, [username, setLoading, setError, setStats, setSource, setHolders]);
 
   useEffect(() => {
     if (isVisible) {
       fetchStats();
     }
   }, [isVisible, fetchStats]);
+
+  // Fetch Top Volore Holders directly from Volchain when modal opens
+  useEffect(() => {
+    (async () => {
+      try {
+        if (!isVisible) { setHolders([]); return; }
+        const resp = await withRetry('/volchain/holders?limit=3', { method: 'GET' }, 1);
+        const data = await resp.json();
+        if (Array.isArray(data)) {
+          setHolders(data.map((h: any) => ({
+            name: h?.name || (typeof h?.pubkey === 'string' ? h.pubkey.slice(0,8) : '---'),
+            balance: Number(h?.balance) || 0,
+            color: h?.color || '#e0e0e0',
+            pubkey: h?.pubkey || ''
+          })));
+        } else {
+          setHolders([]);
+        }
+      } catch {
+        setHolders([]);
+      }
+    })();
+  }, [isVisible]);
 
   // Fetch castles count (defense >= 10) for current user from GridB
   useEffect(() => {
@@ -136,33 +188,36 @@ const BlockchainStats: React.FC<BlockchainStatsProps> = ({ isVisible, onClose, u
                 <div className="stats-row">
                   <div className="stat-item">
                     <span className="stat-label">Total Volore:</span>
-                    <span className="stat-value">{(1000000000).toLocaleString()}</span>
+                    <span className="stat-value">{(chainTotal || 0).toLocaleString()}</span>
                   </div>
                   <div className="stat-item">
                     <span className="stat-label">Mined Volore:</span>
-                    <span className="stat-value">{stats.minedBlocks?.toLocaleString() || 0}</span>
+                    <span className="stat-value">{(chainTotal || 0).toLocaleString()}</span>
                   </div>
                 </div>
+                {isSyncing && (
+                  <div className="stats-note" style={{ color: '#b58900' }}>syncing…</div>
+                )}
               </div>
 
-              {/* 2. Top Lists - Miners */}
+              {/* 2. Top Lists */}
               <div className="stats-section">
                 <div className="top-lists-container">
-                  {/* Top Volore Miners */}
+                  {/* Top Volore Holders */}
                   <div className="top-list-column">
-                    <h4 className="section-title">🏆 Top Volore Miners</h4>
+                    <h4 className="section-title">🏅 Top Volore Holders</h4>
                     <div className="top-miners-list">
                       {Array.from({ length: 3 }).map((_, index) => {
-                        const miner = stats.topMiners?.[index];
+                        const holder = holders[index];
                         return (
-                          <div key={index} className={`miner-item ${!miner ? 'placeholder' : ''}`}>
+                          <div key={index} className={`miner-item ${!holder ? 'placeholder' : ''}`}>
                             <span className="miner-rank">{index + 1}</span>
                             <div 
                               className="miner-color" 
-                              style={{ backgroundColor: miner?.color || '#e0e0e0' }}
+                              style={{ backgroundColor: holder?.color || '#e0e0e0' }}
                             ></div>
-                            <span className="miner-name">{miner?.name || '---'}</span>
-                            <span className="miner-blocks">{miner ? `${miner.blockCount}` : '0'}</span>
+                            <span className="miner-name">{holder?.name || '---'}</span>
+                            <span className="miner-blocks">{holder ? `${holder.balance}` : '0'}</span>
                           </div>
                         );
                       })}
@@ -180,7 +235,7 @@ const BlockchainStats: React.FC<BlockchainStatsProps> = ({ isVisible, onClose, u
                   <div className="stats-row">
                     <div className="stat-item">
                       <span className="stat-label">Your Volore:</span>
-                      <span className="stat-value">{stats.currentUser.totalBlocks}</span>
+                      <span className="stat-value">{(chainUserBalance || 0).toLocaleString()}</span>
                     </div>
                     {typeof castlesCount === 'number' && (
                       <div className="stat-item">
@@ -204,7 +259,7 @@ const BlockchainStats: React.FC<BlockchainStatsProps> = ({ isVisible, onClose, u
             <button onClick={fetchStats} className="refresh-btn" disabled={loading}>
               🔄 Refresh
             </button>
-              <p className="stats-note">Stats are computed locally</p>
+              <p className="stats-note">Stats are computed from Volchain snapshot</p>
           </div>
         </div>
       </div>

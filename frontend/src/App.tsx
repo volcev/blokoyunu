@@ -12,6 +12,7 @@ import "./Modal.css";
 import nacl from 'tweetnacl';
 import { encode, decode as hexDecode } from '@stablelib/hex';
 import VolorePanel from './components/VolorePanel';
+import { withRetry } from './components/request';
 
 // Keystore helpers (AES-GCM PBKDF2)
 function toHex(bytes: Uint8Array): string { return Array.from(bytes).map(b=>b.toString(16).padStart(2,'0')).join(''); }
@@ -85,6 +86,11 @@ const App: React.FC = () => {
       }
     } catch {}
   }, []);
+  
+  // Warm up chain id for request wrapper early
+  useEffect(() => {
+    try { withRetry('/chain/info', { method: 'GET' }, 1).catch(()=>{}); } catch {}
+  }, []);
 
   useEffect(() => {
     const storedName = localStorage.getItem("username");
@@ -101,7 +107,7 @@ const App: React.FC = () => {
     if (username) {
       const sessionToken = localStorage.getItem('session_token');
       if (sessionToken) {
-        fetch('/auth/keystore', { headers: { 'X-Session-Token': sessionToken } })
+        withRetry('/auth/keystore', { method: 'GET', headers: { 'X-Session-Token': sessionToken } }, 1)
           .then(res => res.json())
           .then(async (resp) => {
             const serverKeystore = resp?.powKeystore as string | null;
@@ -160,22 +166,14 @@ const App: React.FC = () => {
                 const kp = generateKeypair();
                 pub = kp.pubHex; priv = kp.privHex;
                 try {
-                  await fetch('/auth/associate-pow-key', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'X-Session-Token': sessionToken },
-                    body: JSON.stringify({ powPubkey: pub })
-                  });
+                  await withRetry('/auth/associate-pow-key', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Session-Token': sessionToken }, body: { powPubkey: pub } }, 1);
                 } catch {}
               }
               const setPw = sessionStorage.getItem('login_password') || '';
               if (setPw) {
                 try {
                   const ks = await encryptKeystore(priv!, setPw);
-                  await fetch('/auth/save-keystore', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'X-Session-Token': sessionToken },
-                    body: JSON.stringify({ powKeystore: ks, powPubkey: pub })
-                  });
+                  await withRetry('/auth/save-keystore', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Session-Token': sessionToken }, body: { powKeystore: ks, powPubkey: pub } }, 1);
                 } catch {}
               }
             }
@@ -184,11 +182,7 @@ const App: React.FC = () => {
             const isPlaceholder = (hex: string) => !!hex && (/^0{64}$/.test(hex) || /^([0-9a-fA-F]{16})\1\1\1$/.test(hex));
             if ((!serverPub || !/^[0-9a-fA-F]{64}$/.test(serverPub) || isPlaceholder(serverPub)) && localPub && /^[0-9a-fA-F]{64}$/.test(localPub)) {
               try {
-                await fetch('/auth/associate-pow-key', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json', 'X-Session-Token': sessionToken },
-                  body: JSON.stringify({ powPubkey: localPub })
-                });
+                await withRetry('/auth/associate-pow-key', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Session-Token': sessionToken }, body: { powPubkey: localPub } }, 1);
                 setServerPowPub(localPub);
               } catch {}
             }
@@ -197,20 +191,12 @@ const App: React.FC = () => {
             if ((!serverPub || isPlaceholder(serverPub) || !/^[0-9a-fA-F]{64}$/.test(serverPub)) && (!localPub || isPlaceholder(localPub) || !/^[0-9a-fA-F]{64}$/.test(localPub))) {
               try {
                 const kp = generateKeypair();
-                await fetch('/auth/associate-pow-key', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json', 'X-Session-Token': sessionToken },
-                  body: JSON.stringify({ powPubkey: kp.pubHex })
-                });
+                await withRetry('/auth/associate-pow-key', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Session-Token': sessionToken }, body: { powPubkey: kp.pubHex } }, 1);
                 setServerPowPub(kp.pubHex);
                 const setPw = sessionStorage.getItem('login_password') || '';
                 if (setPw) {
                   const ks = await encryptKeystore(kp.privHex, setPw);
-                  await fetch('/auth/save-keystore', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'X-Session-Token': sessionToken },
-                    body: JSON.stringify({ powKeystore: ks, powPubkey: kp.pubHex })
-                  });
+                  await withRetry('/auth/save-keystore', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Session-Token': sessionToken }, body: { powKeystore: ks, powPubkey: kp.pubHex } }, 1);
                 }
               } catch {}
             }
@@ -218,7 +204,7 @@ const App: React.FC = () => {
           .catch(() => {});
       }
 
-      fetch(`/auth/user?username=${username}`).catch(() => {});
+      withRetry(`/auth/user?username=${username}`, { method: 'GET' }, 1).catch(() => {});
       try { sessionStorage.removeItem('login_password'); } catch {}
     }
   }, [username]);
@@ -227,13 +213,13 @@ const App: React.FC = () => {
 
   useEffect(() => {
     if (showSettings && username) {
-      fetch(`/auth/user?username=${username}`)
+      withRetry(`/auth/user?username=${username}`, { method: 'GET' }, 1)
         .then(res => res.json())
         .then(user => {
           setUserEmail(user.email);
           setSelectedColor(user.color);
         });
-      fetch(`/stats/volchain?username=${encodeURIComponent(username)}`)
+      withRetry(`/stats/volchain?username=${encodeURIComponent(username)}`, { method: 'GET' }, 1)
         .then(res => res.json())
         .then(v => {
           const serverPubFromStats = v?.volchain?.currentUser?.pubkey || '';
@@ -692,7 +678,7 @@ const App: React.FC = () => {
         <div className="settings-modal">
           <div className="settings-content">
             <div className="modal-header">
-              <h3 className="modal-title">💰 THET Tokenomics</h3>
+              <h3 className="modal-title">💰 Volore Tokenomics</h3>
               <button 
                 className="modal-close-x" 
                 onClick={() => {}}
@@ -704,8 +690,8 @@ const App: React.FC = () => {
             <div className="modal-body">
               <div style={{ marginBottom: '24px' }}>
                 <h4 style={{ color: '#4CAF50', marginBottom: '12px' }}>🔸 Token Basics</h4>
-                <p><strong>Name:</strong> THET Token</p>
-                <p><strong>Symbol:</strong> THET</p>
+                <p><strong>Name:</strong> Volore Token</p>
+                <p><strong>Symbol:</strong> VOLORE</p>
                 <p><strong>Network:</strong> Solana Devnet</p>
                 <p><strong>Decimals:</strong> 9</p>
                 <p><strong>Type:</strong> SPL Token</p>
@@ -723,20 +709,20 @@ const App: React.FC = () => {
               </div>
 
               <div style={{ marginBottom: '24px' }}>
-                <h4 style={{ color: '#2196F3', marginBottom: '12px' }}>🔸 How to Earn THET</h4>
+                <h4 style={{ color: '#2196F3', marginBottom: '12px' }}>🔸 How to Earn Volore</h4>
                 <ul style={{ paddingLeft: '20px', lineHeight: '1.6' }}>
                   <li><strong>Mining:</strong> Dig blocks in Digzone</li>
                   <li><strong>PvP Combat:</strong> Battle in Warzone</li>
                   <li><strong>Castle Bonuses:</strong> Auto-mining from 10+ defense blocks</li>
-                  <li><strong>Reset Warzone:</strong> Convert warzone blocks to THET</li>
+                  <li><strong>Reset Warzone:</strong> Convert warzone blocks to Volore</li>
                 </ul>
               </div>
 
               <div style={{ marginBottom: '24px' }}>
                 <h4 style={{ color: '#FF9800', marginBottom: '12px' }}>🔸 Token Economics</h4>
                 <ul style={{ paddingLeft: '20px', lineHeight: '1.6' }}>
-                  <li><strong>Exchange Rate:</strong> 1 Block = 1 THET</li>
-                  <li><strong>Reset System:</strong> Warzone blocks → THET tokens</li>
+                  <li><strong>Exchange Rate:</strong> 1 Block = 1 Volore</li>
+                  <li><strong>Reset System:</strong> Warzone blocks → Volore tokens</li>
                   <li><strong>Supply Control:</strong> Earned through gameplay only</li>
                   <li><strong>Deflationary:</strong> Limited by game mechanics</li>
                 </ul>
@@ -760,13 +746,13 @@ const App: React.FC = () => {
                   <li>Switch to <strong>Devnet</strong> network</li>
                   <li>Copy your wallet address</li>
                   <li>Add address in Settings</li>
-                  <li>Reset warzone to earn THET!</li>
+                  <li>Reset warzone to earn Volore!</li>
                 </ol>
               </div>
 
               <div style={{ padding: '16px', backgroundColor: '#f5f5f5', borderRadius: '8px', border: '1px solid #ddd' }}>
                 <p style={{ margin: '0', fontSize: '14px', color: '#666' }}>
-                  <strong>⚠️ Important:</strong> THET is on Solana <em>Devnet</em> for testing purposes. 
+                  <strong>⚠️ Important:</strong> Volore is on Solana <em>Devnet</em> for testing purposes. 
                   This is not a real cryptocurrency and has no monetary value.
                 </p>
               </div>

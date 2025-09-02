@@ -1,0 +1,27 @@
+{
+  "height": 56,
+  "prev_hash": "7d2959f9ce155b1f706a761118c2f485acc6438fde246ba26181a9900e66c91d",
+  "hash": "8c19db434f24888b40a7422876960734b62267029ed2c1c2ff0a6887a75b2279",
+  "time": 1756756525091,
+  "txsHash": "e1350c920b7d62a27efaae35c18dfafc7d15c91e673cc2e0702c4157bb94870c",
+  "validator": "LOCAL",
+  "signature": null,
+  "count": 1,
+  "txs": [
+    {
+      "type": "stake",
+      "from": "SYSTEM",
+      "pubkey": "TzOlsyud3+Cugqg4Me1ZdBUvbRf/ZzA4kmoo/ZfF7rI=",
+      "amount": 1,
+      "nonce": 0,
+      "memo": {
+        "reason": "support",
+        "gridIndex": 2183,
+        "username": "Dgngntrkn",
+        "op_id": "9892a4b1-ca9e-4828-918e-0f51ed72a647"
+      },
+      "sig": null,
+      "ts": 1756756524404
+    }
+  ]
+}

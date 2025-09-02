@@ -1,0 +1,25 @@
+{
+  "height": 2,
+  "prev_hash": "205989524ac51c5d28592eb2e2332d4832d29a5e1965f412944a85d01320f5f6",
+  "hash": "f5d9d54a0c890cdc1ad9479290fff4a36636d87c2c6389e26c0b3b4c1c97f312",
+  "time": 1755955460468,
+  "txsHash": "d4156c9127b02958e174ba70a0c86bc1ae4e041d06ed2ff9502b018a915cfd0d",
+  "validator": "LOCAL",
+  "signature": null,
+  "count": 1,
+  "txs": [
+    {
+      "chain_id": "volchain-main",
+      "type": "burn",
+      "from": "SYSTEM",
+      "to": null,
+      "amount": 1,
+      "nonce": 0,
+      "memo": {
+        "reason": "attack_cost"
+      },
+      "pubkey": "UDsPaRQCfLoCMuOh1B8+Sp54v/qhdjq5IvKVzHYh71w=",
+      "sig": ""
+    }
+  ]
+}

@@ -1,0 +1,104 @@
+# Prometheus Alert Rules for VolChain Production
+# Deploy this to your Prometheus /etc/prometheus/rules/ directory
+
+groups:
+  - name: volchain.critical
+    rules:
+      - alert: VolchainSystemVerificationFailed
+        expr: volchain_verify_total{status="fail"} > 0
+        for: 5m
+        labels:
+          severity: warning
+          component: volchain
+          team: blockchain
+        annotations:
+          summary: "VolChain system verification failed"
+          description: "System invariant verification has been failing for 5+ minutes. Check /volchain/verify?mode=system for details."
+          runbook_url: "https://github.com/yourorg/blokoyunu/blob/main/backend/RUNBOOK.md#verification-failure"
+
+      - alert: VolchainBlocksStale
+        expr: volchain_last_block_age_seconds > 60
+        for: 2m
+        labels:
+          severity: critical
+          component: volchain
+          team: blockchain
+        annotations:
+          summary: "VolChain blocks are stale"
+          description: "Last block is {{ $value }} seconds old (> 60s threshold). Producer may be stuck."
+          runbook_url: "https://github.com/yourorg/blokoyunu/blob/main/backend/RUNBOOK.md#stale-blocks"
+
+      - alert: VolchainBarrierTimeouts
+        expr: increase(volchain_barrier_timeouts_total[5m]) > 0
+        for: 1m
+        labels:
+          severity: warning
+          component: volchain
+          team: blockchain
+        annotations:
+          summary: "VolChain barrier timeouts detected"
+          description: "{{ $value }} barrier timeouts in last 5 minutes. System may be under load or having sync issues."
+          runbook_url: "https://github.com/yourorg/blokoyunu/blob/main/backend/RUNBOOK.md#barrier-timeouts"
+
+      - alert: VolchainUserMismatches
+        expr: increase(volchain_invariant_user_mismatch_total[10m]) > 5
+        for: 2m
+        labels:
+          severity: warning
+          component: volchain
+          team: blockchain
+        annotations:
+          summary: "Multiple user balance mismatches detected"
+          description: "{{ $value }} user mismatches in last 10 minutes. Data integrity may be compromised."
+          runbook_url: "https://github.com/yourorg/blokoyunu/blob/main/backend/RUNBOOK.md#user-mismatches"
+
+      - alert: VolchainMempoolOverload
+        expr: volchain_mempool_size > 1000
+        for: 3m
+        labels:
+          severity: warning
+          component: volchain
+          team: blockchain
+        annotations:
+          summary: "VolChain mempool is overloaded"
+          description: "Mempool has {{ $value }} pending transactions (> 1000). Producer may be lagging."
+          runbook_url: "https://github.com/yourorg/blokoyunu/blob/main/backend/RUNBOOK.md#mempool-overload"
+
+  - name: volchain.service
+    rules:
+      - alert: VolchainServiceDown
+        expr: up{job="volchain"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: volchain
+          team: blockchain
+        annotations:
+          summary: "VolChain service is down"
+          description: "VolChain backend service is not responding to health checks."
+          runbook_url: "https://github.com/yourorg/blokoyunu/blob/main/backend/RUNBOOK.md#service-down"
+
+      - alert: VolchainHighResponseTime
+        expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{job="volchain"}[5m])) > 2
+        for: 3m
+        labels:
+          severity: warning
+          component: volchain
+          team: blockchain
+        annotations:
+          summary: "VolChain high response time"
+          description: "95th percentile response time is {{ $value }}s (> 2s threshold)."
+          runbook_url: "https://github.com/yourorg/blokoyunu/blob/main/backend/RUNBOOK.md#high-latency"
+
+# Example Prometheus configuration snippet:
+# Add to /etc/prometheus/prometheus.yml:
+#
+# rule_files:
+#   - "rules/volchain-alerts.yml"
+#
+# scrape_configs:
+#   - job_name: 'volchain'
+#     static_configs:
+#       - targets: ['localhost:3001']
+#     metrics_path: '/volchain/health'
+#     scrape_interval: 30s

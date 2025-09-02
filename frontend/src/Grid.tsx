@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback, Dispatch, SetStateAction, useRef } from "react";
+import { withRetry } from './components/request';
 import { createPortal } from "react-dom";
 import "./Grid.css";
 
@@ -199,8 +200,7 @@ const Grid: React.FC<Props> = ({ username, userColor, showSettings, setShowSetti
 
   const fetchGrid = useCallback(async () => {
     try {
-      console.log("fetchGrid called");
-      const response = await fetch(`${API_BASE}/grid`);
+      const response = await withRetry(`${API_BASE}/grid`, { method: 'GET' }, 1);
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
@@ -211,35 +211,37 @@ const Grid: React.FC<Props> = ({ username, userColor, showSettings, setShowSetti
       );
       setBlockStates(newStates);
       setBlockData(data);
-      setTokenBalance(data.filter((block) => block.dugBy === username).length);
-      console.log("fetchGrid finished");
-
+      // Update token balance from Volchain (Single Source of Truth)
+      try {
+        const volchainRes = await withRetry(`/volchain/user/${username}`, { method: 'GET' }, 1);
+        if (volchainRes.ok) {
+          const volchainData = await volchainRes.json();
+          setTokenBalance(volchainData.balance || 0);
+        } else {
+          // Fallback to Digzone count for compatibility
+          setTokenBalance(data.filter((block) => block.dugBy === username).length);
+        }
+      } catch {
+        // Fallback to Digzone count for compatibility
+        setTokenBalance(data.filter((block) => block.dugBy === username).length);
+      }
       const dugCount = data.filter((block) => block.dugBy !== null).length;
       if (dugCount === data.length) {
-        console.log("Grid is full, adding new blocks...");
         try {
-          const expandResponse = await fetch(`${API_BASE}/expand`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-          });
+          const expandResponse = await withRetry(`${API_BASE}/expand`, { method: 'POST', headers: { 'Content-Type': 'application/json' } }, 1);
           if (!expandResponse.ok) {
-            console.error("Grid expansion failed:", await expandResponse.json());
             return;
           }
-          const newData: Block[] = await (await fetch(`${API_BASE}/grid`)).json();
+          const newData: Block[] = await (await withRetry(`${API_BASE}/grid`, { method: 'GET' }, 1)).json();
           const newStates: BlockState[] = newData.map((block) =>
             block.dugBy ? "dug" : "idle"
           );
           setBlockStates(newStates);
           setBlockData(newData);
           setTokenBalance(newData.filter((block) => block.dugBy === username).length);
-        } catch (error) {
-          console.error("Grid expansion error:", error);
-        }
+        } catch {}
       }
-    } catch (error) {
-      console.error("Failed to fetch grid data:", error);
-    }
+    } catch {}
   }, [username, setBlockData, setTokenBalance]);
 
   useEffect(() => {
@@ -255,7 +257,7 @@ const Grid: React.FC<Props> = ({ username, userColor, showSettings, setShowSetti
     // Fetch colors of all users in grid
     const uniqueUsers = Array.from(new Set(blockData.filter(b => b.dugBy).map(b => b.dugBy)));
     Promise.all(uniqueUsers.map(async (u) => {
-      const res = await fetch(`/auth/user?username=${u}`);
+      const res = await withRetry(`/auth/user?username=${u}`, { method: 'GET' }, 1);
       const data = await res.json();
       return [u, data.color];
     })).then(results => {
@@ -332,21 +334,18 @@ const Grid: React.FC<Props> = ({ username, userColor, showSettings, setShowSetti
             setMiningStatus('submitting');
             
             // 3. Submit the solved block to the main backend
-            const response = await fetch(`${API_BASE}/grid/${index}`, {
+            const response = await withRetry(`${API_BASE}/grid/${index}`, {
               method: "PATCH",
-              headers: {
-                "Content-Type": "application/json",
-                "X-Session-Token": localStorage.getItem("session_token") || ""
-              },
-              body: JSON.stringify({
+              headers: { "Content-Type": "application/json" },
+              body: {
                 dugBy: username,
                 color: userColor,
                 visual: null,
                 height: challenge.height,
                 nonce: nonce,
                 hash: hash
-              }),
-            });
+              }
+            }, 1);
             
             if (!response.ok) {
               const result = await response.json();
@@ -358,8 +357,8 @@ const Grid: React.FC<Props> = ({ username, userColor, showSettings, setShowSetti
                 window.location.reload();
                 return;
               }
-              if (response.status === 429 && result.error === 'Daily mining limit reached') {
-                alert('Your daily mining limit is reached. Please come back tomorrow!');
+              if (response.status === 429) {
+                alert(result?.error || 'Daily mining limit reached');
                 return;
               }
               throw new Error(result.error || "Submitting block failed");
@@ -410,20 +409,17 @@ const Grid: React.FC<Props> = ({ username, userColor, showSettings, setShowSetti
       setBlockStates(newStates);
 
       try {
-        await new Promise((resolve) => setTimeout(resolve, 10000));
+        await new Promise((resolve) => setTimeout(resolve, 3000));
 
-        const response = await fetch(`${API_BASE}/grid/${index}`, {
+        const response = await withRetry(`${API_BASE}/grid/${index}`, {
           method: "PATCH",
-          headers: {
-            "Content-Type": "application/json",
-            "X-Session-Token": localStorage.getItem("session_token") || ""
-          },
-          body: JSON.stringify({
+          headers: { "Content-Type": "application/json" },
+          body: {
             dugBy: username,
             color: userColor,
             visual: null,
-          }),
-        });
+          },
+        }, 1);
 
         if (!response.ok) {
           const result = await response.json();
@@ -435,8 +431,8 @@ const Grid: React.FC<Props> = ({ username, userColor, showSettings, setShowSetti
             window.location.reload();
             return;
           }
-          if (response.status === 429 && result.error === 'Daily mining limit reached') {
-            alert('Your daily mining limit is reached. Please come back tomorrow!');
+          if (response.status === 429) {
+            alert(result?.error || 'Daily mining limit reached');
             newStates[index] = "idle";
             setBlockStates(newStates);
             return;
@@ -446,6 +442,7 @@ const Grid: React.FC<Props> = ({ username, userColor, showSettings, setShowSetti
           setBlockStates(newStates);
           await fetchGrid();
         } else {
+          // No additional wait needed - backend is now fast
           setNewlyDugBlocks(prev => new Set(prev).add(index));
           setTimeout(() => {
             setNewlyDugBlocks(prev => {

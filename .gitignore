@@ -1,14 +1,18 @@
-node_modules
-.env
-.DS_Store
-*.log
+# Keep repo lean but include data per request
+node_modules/
+frontend/node_modules/
+backend/node_modules/
 
-frontend/build/
+# Logs (code, not data)
+*.log
 *.out
-backend/volchain_log.json
-backend/sessions.json
-sessions.json
-frontend/db.json
-frontend/gridb.json
-pow-node/data/accounts.json
+*.err
+
+# Secrets (keep private)
 .env
+backend/admin.secret
+backend/keys/
+
+# OS/editor
+.DS_Store
+*.swp

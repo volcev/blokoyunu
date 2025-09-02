@@ -1,0 +1,27 @@
+{
+  "height": 214,
+  "prev_hash": "a058bdfb08c7c422d1effd9129394f65e4596568cfe58f734c08af4979ad8ca7",
+  "hash": "2a61f6c8595699e602a5f4e0f8dd5abe0e56568779cd7a548599910af684eff1",
+  "time": 1756804948878,
+  "txsHash": "c093e83c21261a7074bddd021bf100493bf1fa07839d8cf3e31b0d55ca8cd2f3",
+  "validator": "LOCAL",
+  "signature": null,
+  "count": 1,
+  "txs": [
+    {
+      "type": "stake",
+      "from": "SYSTEM",
+      "pubkey": "TEI3MBqsgVkwWmXWL7mT6B67xuj33yb2bsJOyLIUtbI=",
+      "amount": 1,
+      "nonce": 0,
+      "memo": {
+        "reason": "claim_ownerless",
+        "gridIndex": 540,
+        "username": "Vol",
+        "op_id": "d6eb5674-c6d3-4fc3-b2cb-b7b54ddf550b"
+      },
+      "sig": null,
+      "ts": 1756804948033
+    }
+  ]
+}

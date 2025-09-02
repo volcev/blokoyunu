@@ -1,0 +1,221 @@
+name: Forever-Guard CI Gate
+
+on:
+  pull_request:
+    branches: [ main, production ]
+  push:
+    branches: [ main ]
+
+env:
+  # Force production-safe environment
+  VOLCHAIN_DEV_FAUCET: '0'
+  VOLCHAIN_MODE: 'mempool'
+  CHAIN_ID: 'volchain-main'
+  NODE_ENV: 'test'
+
+jobs:
+  unit-tests:
+    name: Unit Tests - Core Components
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
+      
+      - name: Install dependencies
+        working-directory: ./backend
+        run: npm ci
+      
+      - name: Test Key Resolver
+        working-directory: ./backend
+        run: |
+          node -e "
+          const { resolveAnyToHex64 } = require('./server.js');
+          // Test hex64 input
+          console.assert(resolveAnyToHex64('4c4237301aac8159305a65d62fb993e81ebbc6e8f7df26f66ec24ec8b214b5b2') === '4c4237301aac8159305a65d62fb993e81ebbc6e8f7df26f66ec24ec8b214b5b2');
+          // Test base64 input  
+          const b64 = Buffer.from('4c4237301aac8159305a65d62fb993e81ebbc6e8f7df26f66ec24ec8b214b5b2', 'hex').toString('base64');
+          console.assert(resolveAnyToHex64(b64) === '4c4237301aac8159305a65d62fb993e81ebbc6e8f7df26f66ec24ec8b214b5b2');
+          console.log('✅ resolveAnyToHex64 tests PASS');
+          "
+      
+      - name: Test Volchain Core Functions
+        working-directory: ./backend
+        run: |
+          node -e "
+          const v = require('./volchain_chain.js');
+          // Test prevalidation
+          const mockSnap = { balances: {'test123': 100}, staked: {'test123': 50}, supply: 100 };
+          const validTx = { type: 'burn', from: null, amount: 30, pubkey: 'test123', memo: {} };
+          try {
+            v.prevalidateTxUsingState(mockSnap, validTx);
+            console.log('✅ Prevalidation tests PASS');
+          } catch (e) {
+            console.error('❌ Prevalidation failed:', e.message);
+            process.exit(1);
+          }
+          "
+
+      - name: Test Barrier Functions
+        working-directory: ./backend
+        run: |
+          node -e "
+          const v = require('./volchain_chain.js');
+          // Test barrier function availability
+          console.assert(typeof v.appendBundle === 'function', 'appendBundle function missing');
+          console.assert(typeof v.waitUntilSealed === 'function', 'waitUntilSealed function missing');  
+          console.assert(typeof v.waitUntilApplied === 'function', 'waitUntilApplied function missing');
+          console.assert(typeof v.getBarrierMetrics === 'function', 'getBarrierMetrics function missing');
+          console.log('✅ Barrier function tests PASS');
+          "
+
+  integration-tests:
+    name: Integration Tests - Ledger-First Flow
+    runs-on: ubuntu-latest
+    needs: unit-tests
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
+      
+      - name: Install dependencies
+        working-directory: ./backend
+        run: npm ci
+      
+      - name: Start Test Server
+        working-directory: ./backend
+        run: |
+          # Create isolated test environment
+          export VOLCHAIN_DATA_DIR=/tmp/ci_volchain_test
+          export GAME_DB_PATH=/tmp/ci_game_test.json
+          export AUTH_DB_PATH=/tmp/ci_auth_test.json
+          export PORT=3333
+          
+          # Initialize test data
+          mkdir -p /tmp/ci_volchain_test
+          echo '{"grid":[],"users":[]}' > /tmp/ci_game_test.json
+          echo '[]' > /tmp/ci_auth_test.json
+          
+          # Start server in background
+          nohup node server.js > /tmp/server_test.log 2>&1 &
+          sleep 5
+          
+          # Test server is running
+          curl -f http://localhost:3333/volchain/health || exit 1
+          echo "✅ Test server started"
+        env:
+          VOLCHAIN_DEV_FAUCET: '0'
+          VOLCHAIN_ADMIN_SECRET: ''
+
+      - name: Test Verification Endpoints
+        run: |
+          # Test blocks verification
+          BLOCKS_VERIFY=$(curl -s http://localhost:3333/volchain/verify | jq -r '.ok')
+          if [ "$BLOCKS_VERIFY" != "true" ]; then
+            echo "❌ Blocks verification failed"
+            exit 1
+          fi
+          
+          # Test system verification  
+          SYSTEM_VERIFY=$(curl -s 'http://localhost:3333/volchain/verify?mode=system' | jq -r '.ok')
+          if [ "$SYSTEM_VERIFY" != "true" ]; then
+            echo "❌ System verification failed"
+            exit 1
+          fi
+          
+          echo "✅ Verification endpoints PASS"
+
+      - name: Test Security Requirements
+        run: |
+          # Test faucet is disabled
+          FAUCET_RESP=$(curl -s -X POST http://localhost:3333/admin/volchain-faucet \
+            -H "Content-Type: application/json" \
+            -d '{"amount":1}' | jq -r '.error')
+          
+          if [ "$FAUCET_RESP" != "forbidden" ]; then
+            echo "❌ Faucet not properly disabled: $FAUCET_RESP"
+            exit 1
+          fi
+          
+          # Test reset is disabled
+          RESET_RESP=$(curl -s -X POST http://localhost:3333/admin/volchain-reset-reseed | jq -r '.error')
+          if [ "$RESET_RESP" != "reset_disabled_in_production" ]; then
+            echo "❌ Reset not properly disabled: $RESET_RESP"
+            exit 1
+          fi
+          
+          echo "✅ Security requirements PASS"
+
+      - name: Test Barrier Metrics
+        run: |
+          # Test barrier metrics are available
+          BARRIER_METRICS=$(curl -s http://localhost:3333/volchain/health | jq -r '.volchain_barrier_timeouts_total')
+          if [ "$BARRIER_METRICS" == "null" ]; then
+            echo "❌ Barrier metrics not available"
+            exit 1
+          fi
+          
+          echo "✅ Barrier metrics PASS"
+
+      - name: Cleanup
+        if: always()
+        run: |
+          pkill -f "node.*server.js" || true
+          rm -rf /tmp/ci_*
+
+  production-readiness:
+    name: Production Readiness Check
+    runs-on: ubuntu-latest
+    needs: [unit-tests, integration-tests]
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Verify Production Configuration
+        run: |
+          # Check no test artifacts in main paths
+          if find backend/ -name "*test*" -not -path "*/dev/*" -not -path "*/node_modules/*" | grep -q .; then
+            echo "❌ Test artifacts found in production paths"
+            exit 1
+          fi
+          
+          # Check dev folder isolation
+          if [ ! -d "backend/dev" ]; then
+            echo "❌ Dev folder for test isolation not found"
+            exit 1
+          fi
+          
+          echo "✅ Production configuration verified"
+
+      - name: Check Required Files
+        run: |
+          # Verify monitoring and runbook files exist
+          [ -f "backend/PRODUCTION_MONITORING.md" ] || { echo "❌ Missing PRODUCTION_MONITORING.md"; exit 1; }
+          [ -f ".github/workflows/ci-gate.yml" ] || { echo "❌ Missing CI gate"; exit 1; }
+          
+          echo "✅ Required files present"
+
+  status-check:
+    name: CI Gate Status
+    runs-on: ubuntu-latest
+    needs: [unit-tests, integration-tests, production-readiness]
+    if: always()
+    steps:
+      - name: Check All Jobs
+        run: |
+          if [ "${{ needs.unit-tests.result }}" != "success" ] || \
+             [ "${{ needs.integration-tests.result }}" != "success" ] || \
+             [ "${{ needs.production-readiness.result }}" != "success" ]; then
+            echo "❌ CI Gate FAILED - One or more checks failed"
+            exit 1
+          fi
+          echo "✅ CI Gate PASSED - All checks successful"

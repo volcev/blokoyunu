@@ -1,0 +1,28 @@
+{
+  "height": 275,
+  "prev_hash": "b578de7ed9e39653af13d24ce50bc218e7e7f588e6d4d8976069234546666536",
+  "hash": "07f44d424038b99ca35797207d091b64f26dc914a62face0ce0d27e7c431c398",
+  "time": 1756805306932,
+  "txsHash": "ad3bf16a0e589a351cbd7ba7fdeedd43f43678c203d8a31aa58a1d789f3aa155",
+  "validator": "LOCAL",
+  "signature": null,
+  "count": 1,
+  "txs": [
+    {
+      "type": "mint",
+      "from": "SYSTEM",
+      "to": null,
+      "amount": 1,
+      "nonce": 0,
+      "memo": {
+        "reason": "dig",
+        "toPubkey": "TEI3MBqsgVkwWmXWL7mT6B67xuj33yb2bsJOyLIUtbI=",
+        "dig_id": "dig:Vol:4557",
+        "op_id": "fcce5f66-a139-40ac-99f7-ee7bf72b1074.dig"
+      },
+      "pubkey": "",
+      "sig": "",
+      "ts": 1756805306923
+    }
+  ]
+}

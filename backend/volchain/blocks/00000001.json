@@ -1,0 +1,162 @@
+{
+  "height": 1,
+  "prev_hash": null,
+  "hash": "839507d06f6e0e3ecb9e0e802461cbf8cb92900d32fdc47ad820847afd6d7c8d",
+  "time": 1756741171284,
+  "txsHash": "d191102ea46f8967aafb50254fa45cf554c9520ef4afc1588c0dd35a7571a8cb",
+  "validator": "LOCAL",
+  "signature": null,
+  "count": 10,
+  "txs": [
+    {
+      "type": "mint",
+      "from": "SYSTEM",
+      "pubkey": "F9D953845CF255EF3C3E34DED606EE03A9DB8596BD8BA0A5EBF607B0BF9DEF5E",
+      "amount": 259,
+      "to": null,
+      "toPubkey": "+dlThFzyVe88PjTe1gbuA6nbhZa9i6Cl6/YHsL+d714=",
+      "nonce": 0,
+      "memo": {
+        "reason": "reset_reseed",
+        "toPubkey": "+dlThFzyVe88PjTe1gbuA6nbhZa9i6Cl6/YHsL+d714="
+      },
+      "sig": null,
+      "ts": 1756741171264
+    },
+    {
+      "type": "mint",
+      "from": "SYSTEM",
+      "pubkey": "503B0F6914027CBA0232E3A1D41F3E4A9E78BFFAA1763AB922F295CC7621EF5C",
+      "amount": 691,
+      "to": null,
+      "toPubkey": "UDsPaRQCfLoCMuOh1B8+Sp54v/qhdjq5IvKVzHYh71w=",
+      "nonce": 0,
+      "memo": {
+        "reason": "reset_reseed",
+        "toPubkey": "UDsPaRQCfLoCMuOh1B8+Sp54v/qhdjq5IvKVzHYh71w="
+      },
+      "sig": null,
+      "ts": 1756741171270
+    },
+    {
+      "type": "mint",
+      "from": "SYSTEM",
+      "pubkey": "15122f7220e13d186e23a5d8f9efef6a2bdc1bee6730aa76516d5d97b157467c",
+      "amount": 382,
+      "to": null,
+      "toPubkey": "FRIvciDhPRhuI6XY+e/vaivcG+5nMKp2UW1dl7FXRnw=",
+      "nonce": 0,
+      "memo": {
+        "reason": "reset_reseed",
+        "toPubkey": "FRIvciDhPRhuI6XY+e/vaivcG+5nMKp2UW1dl7FXRnw="
+      },
+      "sig": null,
+      "ts": 1756741171273
+    },
+    {
+      "type": "mint",
+      "from": "SYSTEM",
+      "pubkey": "4C4237301AAC8159305A65D62FB993E81EBBC6E8F7DF26F66EC24EC8B214B5B2",
+      "amount": 628,
+      "to": null,
+      "toPubkey": "TEI3MBqsgVkwWmXWL7mT6B67xuj33yb2bsJOyLIUtbI=",
+      "nonce": 0,
+      "memo": {
+        "reason": "reset_reseed",
+        "toPubkey": "TEI3MBqsgVkwWmXWL7mT6B67xuj33yb2bsJOyLIUtbI="
+      },
+      "sig": null,
+      "ts": 1756741171274
+    },
+    {
+      "type": "mint",
+      "from": "SYSTEM",
+      "pubkey": "4F33A5B32B9DDFE0AE82A83831ED5974152F6D17FF673038926A28FD97C5EEB2",
+      "amount": 1992,
+      "to": null,
+      "toPubkey": "TzOlsyud3+Cugqg4Me1ZdBUvbRf/ZzA4kmoo/ZfF7rI=",
+      "nonce": 0,
+      "memo": {
+        "reason": "reset_reseed",
+        "toPubkey": "TzOlsyud3+Cugqg4Me1ZdBUvbRf/ZzA4kmoo/ZfF7rI="
+      },
+      "sig": null,
+      "ts": 1756741171275
+    },
+    {
+      "type": "mint",
+      "from": "SYSTEM",
+      "pubkey": "aaf98c79d5bcd87d1d4b3d35382863d6622950d34c0141b7e6f7c591b852bb14",
+      "amount": 183,
+      "to": null,
+      "toPubkey": "qvmMedW82H0dSz01OChj1mIpUNNMAUG35vfFkbhSuxQ=",
+      "nonce": 0,
+      "memo": {
+        "reason": "reset_reseed",
+        "toPubkey": "qvmMedW82H0dSz01OChj1mIpUNNMAUG35vfFkbhSuxQ="
+      },
+      "sig": null,
+      "ts": 1756741171276
+    },
+    {
+      "type": "mint",
+      "from": "SYSTEM",
+      "pubkey": "8f264db82344b9b68c0351de645cd86b9981bcea8109c1fe898dc6c1a282e9a7",
+      "amount": 209,
+      "to": null,
+      "toPubkey": "jyZNuCNEubaMA1HeZFzYa5mBvOqBCcH+iY3GwaKC6ac=",
+      "nonce": 0,
+      "memo": {
+        "reason": "reset_reseed",
+        "toPubkey": "jyZNuCNEubaMA1HeZFzYa5mBvOqBCcH+iY3GwaKC6ac="
+      },
+      "sig": null,
+      "ts": 1756741171277
+    },
+    {
+      "type": "mint",
+      "from": "SYSTEM",
+      "pubkey": "2D82F596592A5E7AD5805594D741261A4CAEDC78608E845D11790621D0EF89CD",
+      "amount": 53,
+      "to": null,
+      "toPubkey": "LYL1llkqXnrVgFWU10EmGkyu3HhgjoRdEXkGIdDvic0=",
+      "nonce": 0,
+      "memo": {
+        "reason": "reset_reseed",
+        "toPubkey": "LYL1llkqXnrVgFWU10EmGkyu3HhgjoRdEXkGIdDvic0="
+      },
+      "sig": null,
+      "ts": 1756741171279
+    },
+    {
+      "type": "mint",
+      "from": "SYSTEM",
+      "pubkey": "41F3421843D365DD4305AD63E51F52454621CBBE9B89B5E69B38FB603FEAC811",
+      "amount": 45,
+      "to": null,
+      "toPubkey": "QfNCGEPTZd1DBa1j5R9SRUYhy76bibXmmzj7YD/qyBE=",
+      "nonce": 0,
+      "memo": {
+        "reason": "reset_reseed",
+        "toPubkey": "QfNCGEPTZd1DBa1j5R9SRUYhy76bibXmmzj7YD/qyBE="
+      },
+      "sig": null,
+      "ts": 1756741171280
+    },
+    {
+      "type": "mint",
+      "from": "SYSTEM",
+      "pubkey": "7e09c928e484c8e7148139e419c053265563f06f653d59d538258b739709c5ea",
+      "amount": 30,
+      "to": null,
+      "toPubkey": "fgnJKOSEyOcUgTnkGcBTJlVj8G9lPVnVOCWLc5cJxeo=",
+      "nonce": 0,
+      "memo": {
+        "reason": "reset_reseed",
+        "toPubkey": "fgnJKOSEyOcUgTnkGcBTJlVj8G9lPVnVOCWLc5cJxeo="
+      },
+      "sig": null,
+      "ts": 1756741171281
+    }
+  ]
+}

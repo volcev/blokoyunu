@@ -1,0 +1,44 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://thisisthecoin.com/schemas/volchain-snapshot.json",
+  "title": "Volchain Snapshot (snapshot.json)",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "lastId": { "type": "integer", "minimum": 0 },
+    "lastHash": { "type": ["string", "null"], "pattern": "^[0-9a-fA-F]{64}$" },
+    "balances": {
+      "type": "object",
+      "additionalProperties": { "type": "integer", "minimum": 0 },
+      "description": "pubkey → balance"
+    },
+    "staked": {
+      "type": "object",
+      "additionalProperties": { "type": "integer", "minimum": 0 },
+      "description": "pubkey → staked amount"
+    },
+    "lastBlockId": { "type": "integer", "minimum": 0 },
+    "lastBlockHash": { "type": ["string", "null"], "pattern": "^[0-9a-fA-F]{64}$" },
+    "height": { "type": "integer", "minimum": 0 }
+  },
+  "required": ["lastId", "balances"],
+  "examples": [
+    {
+      "lastId": 2507,
+      "lastHash": "13e9558575024ae02dec2effaea22bfe838ec7bcd09e9e52bf672d02b38a2416",
+      "balances": {
+        "4C4237301AAC8159305A65D62FB993E81EBBC6E8F7DF26F66EC24EC8B214B5B2": 357,
+        "8f264db82344b9b68c0351de645cd86b9981bcea8109c1fe898dc6c1a282e9a7": 209
+      },
+      "staked": {
+        "503B0F6914027CBA0232E3A1D41F3E4A9E78BFFAA1763AB922F295CC7621EF5C": 234
+      },
+      "lastBlockId": 17,
+      "lastBlockHash": "d7ec4b72e680ff35b30107ef1052253a323c45d7f53af24d39061fa8897b2721",
+      "height": 1
+    }
+  ]
+}
+
+
+

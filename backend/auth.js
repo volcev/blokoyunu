@@ -11,8 +11,8 @@ app.use(cors());
 app.use(express.json());
 
 const path = require('path');
-const DB_FILE = path.join(__dirname, 'db.json');
-const SESSIONS_FILE = path.join(__dirname, '..', 'sessions.json');
+const DB_FILE = process.env.AUTH_DB_PATH ? String(process.env.AUTH_DB_PATH) : path.join(__dirname, 'db.json');
+const SESSIONS_FILE = process.env.AUTH_SESSIONS_PATH ? String(process.env.AUTH_SESSIONS_PATH) : path.join(__dirname, '..', 'sessions.json');
 const GRIDB_FILE = path.join(__dirname, 'gridb.json');
 
 const ACCOUNTS_FILE = '/home/volcev/pow-node/data/accounts.json';

@@ -1,0 +1,197 @@
+[
+  {
+    "ts": 1756726279655,
+    "type": "mint",
+    "username": "Volkan2",
+    "pubkey": "503B0F6914027CBA0232E3A1D41F3E4A9E78BFFAA1763AB922F295CC7621EF5C",
+    "amount": 1,
+    "gridIndex": 4397,
+    "op_id": "95086d47-ae2f-494c-a821-960155275441.dig",
+    "memo": {
+      "reason": "dig",
+      "toPubkey": "503B0F6914027CBA0232E3A1D41F3E4A9E78BFFAA1763AB922F295CC7621EF5C",
+      "dig_id": "dig:Volkan2:4397",
+      "op_id": "95086d47-ae2f-494c-a821-960155275441.dig"
+    }
+  },
+  {
+    "ts": 1756726146689,
+    "type": "mint",
+    "username": "Volkan2",
+    "pubkey": "503B0F6914027CBA0232E3A1D41F3E4A9E78BFFAA1763AB922F295CC7621EF5C",
+    "amount": 1,
+    "gridIndex": 4468,
+    "op_id": "5804e28c-3035-41d1-aaac-f415ffce2fea.dig",
+    "memo": {
+      "reason": "dig",
+      "toPubkey": "503B0F6914027CBA0232E3A1D41F3E4A9E78BFFAA1763AB922F295CC7621EF5C",
+      "dig_id": "dig:Volkan2:4468",
+      "op_id": "5804e28c-3035-41d1-aaac-f415ffce2fea.dig"
+    }
+  },
+  {
+    "ts": 1756725691497,
+    "type": "mint",
+    "username": "Volkan2",
+    "pubkey": "503B0F6914027CBA0232E3A1D41F3E4A9E78BFFAA1763AB922F295CC7621EF5C",
+    "amount": 1,
+    "gridIndex": 4396,
+    "op_id": "c474c188-86b6-409a-8888-49bb049a4fc2.dig",
+    "memo": {
+      "reason": "dig",
+      "toPubkey": "503B0F6914027CBA0232E3A1D41F3E4A9E78BFFAA1763AB922F295CC7621EF5C",
+      "dig_id": "dig:Volkan2:4396",
+      "op_id": "c474c188-86b6-409a-8888-49bb049a4fc2.dig"
+    }
+  },
+  {
+    "ts": 1756725680167,
+    "type": "mint",
+    "username": "Volkan2",
+    "pubkey": "503B0F6914027CBA0232E3A1D41F3E4A9E78BFFAA1763AB922F295CC7621EF5C",
+    "amount": 1,
+    "gridIndex": 4395,
+    "op_id": "eb7532d2-eb61-4e8d-84a2-8f416cc8202b.dig",
+    "memo": {
+      "reason": "dig",
+      "toPubkey": "503B0F6914027CBA0232E3A1D41F3E4A9E78BFFAA1763AB922F295CC7621EF5C",
+      "dig_id": "dig:Volkan2:4395",
+      "op_id": "eb7532d2-eb61-4e8d-84a2-8f416cc8202b.dig"
+    }
+  },
+  {
+    "ts": 1756724891980,
+    "type": "mint",
+    "username": "Volkan2",
+    "pubkey": "503B0F6914027CBA0232E3A1D41F3E4A9E78BFFAA1763AB922F295CC7621EF5C",
+    "amount": 1,
+    "gridIndex": 4495,
+    "op_id": "7c81639a-9993-4883-b149-3f411405c0bd.dig",
+    "memo": {
+      "reason": "dig",
+      "toPubkey": "503B0F6914027CBA0232E3A1D41F3E4A9E78BFFAA1763AB922F295CC7621EF5C",
+      "dig_id": "dig:Volkan2:4495",
+      "op_id": "7c81639a-9993-4883-b149-3f411405c0bd.dig"
+    }
+  },
+  {
+    "ts": 1756724181963,
+    "type": "mint",
+    "username": "Volkan2",
+    "pubkey": "503B0F6914027CBA0232E3A1D41F3E4A9E78BFFAA1763AB922F295CC7621EF5C",
+    "amount": 1,
+    "gridIndex": 4468,
+    "op_id": "31f3f080-20f5-490a-9a13-f1065364d870.dig",
+    "memo": {
+      "reason": "dig",
+      "toPubkey": "503B0F6914027CBA0232E3A1D41F3E4A9E78BFFAA1763AB922F295CC7621EF5C",
+      "dig_id": "dig:Volkan2:4468",
+      "op_id": "31f3f080-20f5-490a-9a13-f1065364d870.dig"
+    }
+  },
+  {
+    "ts": 1756722347207,
+    "type": "mint",
+    "username": "Volkan2",
+    "pubkey": "503B0F6914027CBA0232E3A1D41F3E4A9E78BFFAA1763AB922F295CC7621EF5C",
+    "amount": 1,
+    "gridIndex": 4467,
+    "op_id": "2552041a-e823-434d-84c3-416a599e5594.dig",
+    "memo": {
+      "reason": "dig",
+      "toPubkey": "503B0F6914027CBA0232E3A1D41F3E4A9E78BFFAA1763AB922F295CC7621EF5C",
+      "dig_id": "dig:Volkan2:4467",
+      "op_id": "2552041a-e823-434d-84c3-416a599e5594.dig"
+    }
+  },
+  {
+    "ts": 1756722014484,
+    "type": "mint",
+    "username": "Volkan2",
+    "pubkey": "503B0F6914027CBA0232E3A1D41F3E4A9E78BFFAA1763AB922F295CC7621EF5C",
+    "amount": 1,
+    "gridIndex": 4466,
+    "op_id": "013f23f8-8cfe-43f6-b3ec-2c2d5104f477.dig",
+    "memo": {
+      "reason": "dig",
+      "toPubkey": "503B0F6914027CBA0232E3A1D41F3E4A9E78BFFAA1763AB922F295CC7621EF5C",
+      "dig_id": "dig:Volkan2:4466",
+      "op_id": "013f23f8-8cfe-43f6-b3ec-2c2d5104f477.dig"
+    }
+  },
+  {
+    "ts": 1756718921004,
+    "type": "mint",
+    "username": "Volkan2",
+    "pubkey": "503B0F6914027CBA0232E3A1D41F3E4A9E78BFFAA1763AB922F295CC7621EF5C",
+    "amount": 1,
+    "gridIndex": 4361,
+    "op_id": "cf7f8ccb-5254-462b-81cb-155bf7d61ab2.dig",
+    "memo": {
+      "reason": "dig",
+      "toPubkey": "503B0F6914027CBA0232E3A1D41F3E4A9E78BFFAA1763AB922F295CC7621EF5C",
+      "dig_id": "dig:Volkan2:4361",
+      "op_id": "cf7f8ccb-5254-462b-81cb-155bf7d61ab2.dig"
+    }
+  },
+  {
+    "ts": 1756714050869,
+    "type": "mint",
+    "username": "Volkan2",
+    "pubkey": "503B0F6914027CBA0232E3A1D41F3E4A9E78BFFAA1763AB922F295CC7621EF5C",
+    "amount": 1,
+    "gridIndex": 4400,
+    "op_id": "850f4ce1-29c2-4405-a85f-6f078876df4c.dig",
+    "memo": {
+      "reason": "dig",
+      "toPubkey": "503B0F6914027CBA0232E3A1D41F3E4A9E78BFFAA1763AB922F295CC7621EF5C",
+      "dig_id": "dig:Volkan2:4400",
+      "op_id": "850f4ce1-29c2-4405-a85f-6f078876df4c.dig"
+    }
+  },
+  {
+    "ts": 1756714035163,
+    "type": "mint",
+    "username": "Volkan2",
+    "pubkey": "503B0F6914027CBA0232E3A1D41F3E4A9E78BFFAA1763AB922F295CC7621EF5C",
+    "amount": 1,
+    "gridIndex": 4361,
+    "op_id": "2594d33c-6ce3-4d17-a148-872aa0dadc2a.dig",
+    "memo": {
+      "reason": "dig",
+      "toPubkey": "503B0F6914027CBA0232E3A1D41F3E4A9E78BFFAA1763AB922F295CC7621EF5C",
+      "dig_id": "dig:Volkan2:4361",
+      "op_id": "2594d33c-6ce3-4d17-a148-872aa0dadc2a.dig"
+    }
+  },
+  {
+    "ts": 1756713040748,
+    "type": "mint",
+    "username": "Volkan2",
+    "pubkey": "503B0F6914027CBA0232E3A1D41F3E4A9E78BFFAA1763AB922F295CC7621EF5C",
+    "amount": 1,
+    "gridIndex": 4468,
+    "op_id": "c2b5c034-0398-4f5a-b070-ca77a21e4248",
+    "memo": {
+      "reason": "dig",
+      "toPubkey": "503B0F6914027CBA0232E3A1D41F3E4A9E78BFFAA1763AB922F295CC7621EF5C",
+      "dig_id": "dig:Volkan2:4468",
+      "op_id": "c2b5c034-0398-4f5a-b070-ca77a21e4248"
+    }
+  },
+  {
+    "ts": 1756712936514,
+    "type": "mint",
+    "username": "Volkan2",
+    "pubkey": "503B0F6914027CBA0232E3A1D41F3E4A9E78BFFAA1763AB922F295CC7621EF5C",
+    "amount": 1,
+    "gridIndex": 4467,
+    "op_id": "9d7f3992-9389-4ec8-b244-df3ac09fc5f2",
+    "memo": {
+      "reason": "dig",
+      "toPubkey": "503B0F6914027CBA0232E3A1D41F3E4A9E78BFFAA1763AB922F295CC7621EF5C",
+      "dig_id": "dig:Volkan2:4467",
+      "op_id": "9d7f3992-9389-4ec8-b244-df3ac09fc5f2"
+    }
+  }
+]

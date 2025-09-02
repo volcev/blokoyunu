@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback, useRef } from "react";
+import { withRetry } from './components/request';
 import { createPortal } from "react-dom";
 import "./Grid.css";
 
@@ -65,6 +66,7 @@ const GridB: React.FC<Props> = ({ totalBlocks, username, userColor, tokenBalance
   const [userColors, setUserColors] = useState<{ [username: string]: string }>({});
   const [showBlockModal, setShowBlockModal] = useState<boolean>(false);
   const [selectedBlockIndex, setSelectedBlockIndex] = useState<number | null>(null);
+  const [warMode, setWarMode] = useState<'stake' | 'unstake'>('stake');
   
   const getModalWidth = () => {
     const screenWidth = window.screen.width || window.innerWidth;
@@ -218,7 +220,7 @@ const GridB: React.FC<Props> = ({ totalBlocks, username, userColor, tokenBalance
   }, [totalBlocks]);
 
   useEffect(() => {
-    const uniqueUsers = Array.from(new Set(gridB.filter(b => b && b.owner).map(b => b.owner)));
+    const uniqueUsers = Array.from(new Set(gridB.filter(b => b && typeof b === 'object' && b.owner).map(b => b.owner)));
     Promise.all(uniqueUsers.map(async (u) => {
       const res = await fetch(`/auth/user?username=${u}`);
       const data = await res.json();
@@ -230,45 +232,45 @@ const GridB: React.FC<Props> = ({ totalBlocks, username, userColor, tokenBalance
     });
   }, [gridB]);
 
-  const userBlocksInGridB = gridB.filter(b => b.owner === username);
-  const totalDefenseUsed = userBlocksInGridB.reduce((sum, b) => sum + (b.defense || 1), 0);
+  const userBlocksInGridB = gridB.filter(b => b && typeof b === 'object' && b.owner === username);
+  const totalDefenseUsed = userBlocksInGridB.reduce((sum, b) => sum + (Number(b.defense || 1) || 1), 0);
   const currentStock = tokenBalance - totalDefenseUsed;
 
   const handleBlockClick = useCallback((index: number) => {
     if (loading) return;
-    
-    const realTimeCurrentStock = tokenBalance - totalDefenseUsed;
-    const selectedBlock = gridB[index];
-    const needsStock = !selectedBlock?.owner || selectedBlock.owner !== username;
-    
-    if (needsStock && realTimeCurrentStock <= 0) {
-      alert('⚠️ No available blocks for war! Mine more blocks in Digzone first.');
-      return;
-    }
-    
-    if (!selectedBlock?.owner) {
-      const userHasNoBlocksInGridB = gridB.filter(b => b.owner === username).length === 0;
-      const isFirstPlacement = userHasNoBlocksInGridB;
-      
-      if (!isFirstPlacement) {
-        const neighbors = getNeighbors(index, totalBlocks, columnCount);
-        const hasNeighbor = neighbors.some(n => gridB[n] && gridB[n].owner === username);
-        if (!hasNeighbor) {
-          alert('⚠️ You must place blocks adjacent to your existing blocks! Expand step by step.');
-          return;
+    const selectedBlock = (gridB[index] && typeof gridB[index] === 'object') ? gridB[index] : null;
+
+    if (warMode === 'stake') {
+      const realTimeCurrentStock = tokenBalance - totalDefenseUsed;
+      const needsStock = !selectedBlock?.owner || selectedBlock.owner !== username;
+      if (needsStock && realTimeCurrentStock <= 0) {
+        alert('⚠️ No available blocks for war! Mine more blocks in Digzone first.');
+        return;
+      }
+
+      if (!selectedBlock?.owner) {
+        const userHasNoBlocksInGridB = gridB.filter(b => b && typeof b === 'object' && b.owner === username).length === 0;
+        const isFirstPlacement = userHasNoBlocksInGridB;
+        if (!isFirstPlacement) {
+          const neighbors = getNeighbors(index, totalBlocks, columnCount);
+          const hasNeighbor = neighbors.some(n => gridB[n] && typeof gridB[n] === 'object' && gridB[n].owner === username);
+          if (!hasNeighbor) {
+            alert('⚠️ You must place blocks adjacent to your existing blocks! Expand step by step.');
+            return;
+          }
         }
       }
     }
-    
+
     setSelectedBlockIndex(index);
     setShowBlockModal(true);
-  }, [loading, tokenBalance, totalDefenseUsed, gridB, username, totalBlocks, columnCount]);
+  }, [loading, tokenBalance, totalDefenseUsed, gridB, username, totalBlocks, columnCount, warMode]);
 
   const handleBlockAction = useCallback(async (index: number) => {
     if (loading) return;
     
     const realTimeCurrentStock = tokenBalance - totalDefenseUsed;
-    const selectedBlock = gridB[index];
+    const selectedBlock = (gridB[index] && typeof gridB[index] === 'object') ? gridB[index] : null;
     const needsStock = !selectedBlock?.owner || selectedBlock.owner !== username;
     
     if (needsStock && realTimeCurrentStock <= 0) {
@@ -278,12 +280,12 @@ const GridB: React.FC<Props> = ({ totalBlocks, username, userColor, tokenBalance
     }
     
     if (!selectedBlock?.owner) {
-      const userHasNoBlocksInGridB = gridB.filter(b => b.owner === username).length === 0;
+      const userHasNoBlocksInGridB = gridB.filter(b => b && typeof b === 'object' && b.owner === username).length === 0;
       const isFirstPlacement = userHasNoBlocksInGridB;
       
       if (!isFirstPlacement) {
         const neighbors = getNeighbors(index, totalBlocks, columnCount);
-        const hasNeighbor = neighbors.some(n => gridB[n] && gridB[n].owner === username);
+        const hasNeighbor = neighbors.some(n => gridB[n] && typeof gridB[n] === 'object' && gridB[n].owner === username);
         if (!hasNeighbor) {
           alert('⚠️ You must place blocks adjacent to your existing blocks! Expand step by step.');
           setShowBlockModal(false);
@@ -294,58 +296,286 @@ const GridB: React.FC<Props> = ({ totalBlocks, username, userColor, tokenBalance
     
     setShowBlockModal(false);
     setLoading(true);
+    const prevOwner = selectedBlock?.owner || null;
+    const prevDefense = typeof selectedBlock?.defense === 'number' ? selectedBlock!.defense : (selectedBlock?.owner ? 1 : 0);
     
     await new Promise(resolve => setTimeout(resolve, 100));
     
-    const res = await fetch(`/gridb/${index}`, {
-      method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Session-Token': localStorage.getItem('session_token') || ''
+    // Retry mechanism for guard system failures
+    let attempts = 0;
+    const maxAttempts = 3;
+    
+    while (attempts < maxAttempts) {
+      try {
+        const res = await withRetry(`/gridb/${index}`, { 
+          method: 'PATCH', 
+          headers: { 'Content-Type': 'application/json' },
+          body: { action: 'attack' }
+        }, 1);
+        
+        if (res.ok) {
+          const data = await res.json();
+          
+          // Handle new attack response format
+          if (data.ok && data.gridb) {
+            setGridB(data.gridb);
+            console.log(`[ATTACK] Success: ${data.mode}, effects:`, data.effects);
+          } else if (Array.isArray(data)) {
+            // Legacy format
+            setGridB(data);
+          } else {
+            console.warn('[ATTACK] Unexpected response format:', data);
+            setGridB(data);
+          }
+          
+          // If target cell appears unchanged in returned payload, force a fresh read
+          const gridData = data.gridb || data;
+          try {
+            const updated = (gridData[index] && typeof gridData[index] === 'object') ? gridData[index] : null;
+            const updatedOwner = updated?.owner || null;
+            const updatedDefense = typeof updated?.defense === 'number' ? updated.defense : (updated?.owner ? 1 : 0);
+            const changed = (updatedOwner !== prevOwner) || (updatedDefense !== prevDefense);
+            if (!changed) {
+              const gbRes = await withRetry('/gridb', { method: 'GET', requireOpId: false }, 1);
+              if (gbRes.ok) {
+                const gb = await gbRes.json();
+                setGridB(gb);
+              }
+            }
+          } catch {}
+          
+          try {
+            const gridRes = await withRetry('/grid', { method: 'GET', requireOpId: false }, 1);
+            if (gridRes.ok) {
+              const gridData = await gridRes.json();
+              setBlockData(gridData);
+              const userGridBlocks = gridData.filter((block: any) => block.dugBy === username);
+              const newTokenBalance = userGridBlocks.length;
+              setTokenBalance(newTokenBalance);
+              console.log(`🔄 Token balance updated: ${tokenBalance} → ${newTokenBalance}`);
+            }
+          } catch (error) {
+            console.error('Failed to update grid data:', error);
+          }
+          
+          const ownersSource = Array.isArray(gridData)
+            ? gridData
+            : (Array.isArray((data as any)?.gridb) ? (data as any).gridb : []);
+          const uniqueOwners = Array.from(new Set(
+            ownersSource
+              .filter((b: any) => b && typeof b === 'object' && b.owner)
+              .map((b: any) => b.owner)
+          )) as string[];
+          const colorPromises = uniqueOwners.map(async (owner: string) => {
+            try {
+              const userRes = await withRetry(`/auth/user?username=${owner}`, { method: 'GET', requireOpId: false }, 1);
+              if (userRes.ok) {
+                const userData = await userRes.json();
+                return { [owner]: userData.color };
+              }
+            } catch (e) {
+              console.log('Color fetch failed for', owner);
+            }
+            return {};
+          });
+          
+          const colors = await Promise.all(colorPromises);
+          const newUserColors = colors.reduce((acc, colorObj) => ({ ...acc, ...colorObj }), {});
+          setUserColors(prev => ({ ...prev, ...newUserColors }));
+          
+          setLoading(false);
+          return; // Success, exit retry loop
+        } else {
+          const err = await res.json();
+          if (err.error === 'guard_system_failed') {
+            attempts++;
+            if (attempts < maxAttempts) {
+              console.log(`Guard system busy, retrying... (${attempts}/${maxAttempts})`);
+              await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second before retry
+              continue;
+            } else {
+              alert('⚠️ System temporarily busy. Please try again in a moment.');
+            }
+          } else {
+            alert(err.error || 'Block action failed');
+          }
+          break;
+        }
+      } catch (error) {
+        attempts++;
+        console.error('Request failed:', error);
+        if (attempts < maxAttempts) {
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          continue;
+        } else {
+          alert('⚠️ Connection error. Please try again.');
+        }
       }
-    });
+    }
+    setLoading(false);
+  }, [loading, setBlockData, setTokenBalance, username, tokenBalance, totalDefenseUsed, gridB, columnCount, totalBlocks]);
+
+  // Stake (defense +1) for own block
+  const handleStake = useCallback(async (index: number) => {
+    if (loading) return;
+    const selectedBlock = (gridB[index] && typeof gridB[index] === 'object') ? gridB[index] : null;
+    if (!selectedBlock || selectedBlock.owner !== username) return;
+
+    if ((selectedBlock.defense || 1) >= 10) {
+      alert('🏰 Maximum defense reached! Cannot stake further.');
+      return;
+    }
+
+    setShowBlockModal(false);
+    setLoading(true);
+    await new Promise(resolve => setTimeout(resolve, 100));
+
+    const res = await withRetry(`/gridb/${index}/stake`, { method: 'POST', headers: { 'Content-Type': 'application/json' } }, 1);
+
     if (res.ok) {
       const data = await res.json();
-      setGridB(data);
-      
+      console.log('Stake response:', data); // Debug log
+
+      // If data is object with success property, refresh gridB instead
+      if (data.success) {
+        // Refresh gridB to get updated data (no info modal)
+        fetchGridB();
+      } else if (Array.isArray(data)) {
+        // Legacy format
+        setGridB(data);
+      } else {
+        console.error('Unexpected response format:', data);
+        fetchGridB();
+      }
+
       try {
-        const gridRes = await fetch('/grid');
+        const gridRes = await withRetry('/grid', { method: 'GET', requireOpId: false }, 1);
         if (gridRes.ok) {
           const gridData = await gridRes.json();
           setBlockData(gridData);
           const userGridBlocks = gridData.filter((block: any) => block.dugBy === username);
           const newTokenBalance = userGridBlocks.length;
           setTokenBalance(newTokenBalance);
-          console.log(`🔄 Token balance updated: ${tokenBalance} → ${newTokenBalance}`);
         }
       } catch (error) {
         console.error('Failed to update grid data:', error);
       }
-      
-      const uniqueOwners = Array.from(new Set(data.filter((b: any) => b.owner).map((b: any) => b.owner))) as string[];
-      const colorPromises = uniqueOwners.map(async (owner: string) => {
-        try {
-          const userRes = await fetch(`/auth/user?username=${owner}`);
-          if (userRes.ok) {
-            const userData = await userRes.json();
-            return { [owner]: userData.color };
-          }
-        } catch (e) {
-          console.log('Color fetch failed for', owner);
-        }
-        return {};
-      });
-      
-      const colors = await Promise.all(colorPromises);
-      const newUserColors = colors.reduce((acc, colorObj) => ({ ...acc, ...colorObj }), {});
-      setUserColors(prev => ({ ...prev, ...newUserColors }));
-      
     } else {
-      const err = await res.json();
-      alert(err.error || 'Block action failed');
+      const err = await res.json().catch(() => ({} as any));
+      if (err.error === 'guard_system_failed') {
+        alert('⚠️ System temporarily busy. Please try again in a moment.');
+      } else {
+        alert(err.error || 'Stake failed');
+      }
     }
     setLoading(false);
-  }, [loading, setBlockData, setTokenBalance, username, tokenBalance, totalDefenseUsed, gridB, columnCount, totalBlocks]);
+  }, [loading, gridB, setBlockData, setTokenBalance, username]);
+
+  // Unstake (defense -1) for own block
+  const handleUnstake = useCallback(async (index: number) => {
+    if (loading) return;
+    const selectedBlock = (gridB[index] && typeof gridB[index] === 'object') ? gridB[index] : null;
+    if (!selectedBlock || selectedBlock.owner !== username) return;
+
+    // Remove extra confirmation: initial modal is sufficient
+
+    setShowBlockModal(false);
+    setLoading(true);
+    await new Promise(resolve => setTimeout(resolve, 100));
+
+    const res = await withRetry(`/gridb/${index}/unstake`, { method: 'POST', headers: { 'Content-Type': 'application/json' } }, 1);
+
+    if (res.ok) {
+      const data = await res.json();
+      console.log('Unstake response:', data); // Debug log
+
+      // If data is object with success property, refresh gridB instead
+      if (data.success) {
+        // Refresh gridB to get updated data (no info modal)
+        fetchGridB();
+      } else if (Array.isArray(data)) {
+        // Legacy format
+        setGridB(data);
+      } else {
+        console.error('Unexpected response format:', data);
+        fetchGridB();
+      }
+
+      try {
+        const gridRes = await withRetry('/grid', { method: 'GET', requireOpId: false }, 1);
+        if (gridRes.ok) {
+          const gridData = await gridRes.json();
+          setBlockData(gridData);
+          const userGridBlocks = gridData.filter((block: any) => block.dugBy === username);
+          const newTokenBalance = userGridBlocks.length;
+          setTokenBalance(newTokenBalance);
+        }
+      } catch (error) {
+        console.error('Failed to update grid data:', error);
+      }
+    } else {
+      const err = await res.json().catch(() => ({} as any));
+      if (err.error === 'guard_system_failed') {
+        alert('⚠️ System temporarily busy. Please try again in a moment.');
+      } else {
+        alert(err.error || 'Unstake failed');
+      }
+    }
+    setLoading(false);
+  }, [loading, gridB, setBlockData, setTokenBalance, username]);
+
+  // Remove block (full unstake) for own block with defense 1
+  const handleRemove = useCallback(async (index: number) => {
+    if (loading) return;
+    const selectedBlock = gridB[index];
+    if (!selectedBlock || selectedBlock.owner !== username) return;
+
+    // Remove extra confirmation: initial modal is sufficient
+
+    setShowBlockModal(false);
+    setLoading(true);
+    await new Promise(resolve => setTimeout(resolve, 100));
+
+    const res = await withRetry(`/gridb/${index}`, { method: 'DELETE', headers: { 'Content-Type': 'application/json' } }, 1);
+
+    if (res.ok) {
+      const data = await res.json();
+      console.log('Remove response:', data); // Debug log
+
+      // If data is object with success property, refresh gridB instead
+      if (data.success) {
+        // Refresh gridB to get updated data (no info modal)
+        fetchGridB();
+      } else if (Array.isArray(data)) {
+        // Legacy format
+        setGridB(data);
+      } else {
+        console.error('Unexpected response format:', data);
+        fetchGridB();
+      }
+
+      try {
+        const gridRes = await withRetry('/grid', { method: 'GET', requireOpId: false }, 1);
+        if (gridRes.ok) {
+          const gridData = await gridRes.json();
+          setBlockData(gridData);
+          const userGridBlocks = gridData.filter((block: any) => block.dugBy === username);
+          const newTokenBalance = userGridBlocks.length;
+          setTokenBalance(newTokenBalance);
+        }
+      } catch (error) {
+        console.error('Failed to update grid data:', error);
+      }
+    } else {
+      const err = await res.json().catch(() => ({} as any));
+      if (err.error === 'guard_system_failed') {
+        alert('⚠️ System temporarily busy. Please try again in a moment.');
+      } else {
+        alert(err.error || 'Remove failed');
+      }
+    }
+    setLoading(false);
+  }, [loading, gridB, setBlockData, setTokenBalance, username]);
 
   const [touchStartPos, setTouchStartPos] = useState<{ x: number; y: number; time: number } | null>(null);
   const [isMultiTouch, setIsMultiTouch] = useState(false);
@@ -358,6 +588,9 @@ const GridB: React.FC<Props> = ({ totalBlocks, username, userColor, tokenBalance
   const [position, setPosition] = useState({ x: 0, y: 0 });
   const [lastPosition, setLastPosition] = useState({ x: 0, y: 0 });
   const gridRef = useRef<HTMLDivElement>(null);
+  // Touch/click management
+  const isTouchDeviceRef = useRef<boolean>(false);
+  const suppressNextClickRef = useRef<boolean>(false);
   
   // Min/max zoom limits
   const MIN_SCALE = 1;
@@ -369,6 +602,15 @@ const GridB: React.FC<Props> = ({ totalBlocks, username, userColor, tokenBalance
   const momentumRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const lastTimeRef = useRef<number>(0);
   const animationFrameRef = useRef<number | null>(null);
+
+  // Setup environment flags once
+  useEffect(() => {
+    try {
+      isTouchDeviceRef.current = ('ontouchstart' in window) || (navigator.maxTouchPoints || 0) > 0;
+    } catch {
+      isTouchDeviceRef.current = false;
+    }
+  }, []);
 
   // Pan sınırlarını hesapla
   const getPanBoundaries = useCallback(() => {
@@ -594,7 +836,11 @@ const GridB: React.FC<Props> = ({ totalBlocks, username, userColor, tokenBalance
     const duration = Date.now() - touchStartPos.time;
 
     // A valid tap should be short in duration and move a very small distance.
-    const isTap = duration < 250 && distance < 10;
+    // Make tap detection stricter at higher zoom to avoid accidental taps
+    const TAP_DURATION_MS = 250;
+    const baseMoveThresholdPx = 10; // at scale=1
+    const moveThresholdPx = Math.max(2, baseMoveThresholdPx / Math.max(1, scale));
+    const isTap = duration < TAP_DURATION_MS && distance < moveThresholdPx;
 
     // Pinch sonrası ilk tap'i yoksay
     if (isTap) {
@@ -607,8 +853,14 @@ const GridB: React.FC<Props> = ({ totalBlocks, username, userColor, tokenBalance
       e.preventDefault();
       handleBlockClick(index);
     } else {
-      // It's a pan/drag, apply momentum
+      // It's a pan/drag, apply momentum and suppress any synthetic click
       setMomentum(momentumRef.current);
+      try {
+        // Prevent the subsequent synthetic click
+        (e as unknown as Event).preventDefault?.();
+      } catch {}
+      suppressNextClickRef.current = true;
+      window.setTimeout(() => { suppressNextClickRef.current = false; }, 250);
     }
 
     setTouchStartPos(null);
@@ -623,13 +875,48 @@ const GridB: React.FC<Props> = ({ totalBlocks, username, userColor, tokenBalance
       padding: isMobile() ? "8px" : "16px",
       boxSizing: "border-box"
     }}>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: isMobile() ? 40 : 0, marginBottom: isMobile() ? 8 : 12 }}>
+        <div style={{ display: 'inline-flex', border: '1px solid #ddd', borderRadius: 8, overflow: 'hidden' }}>
+          <button
+            onClick={() => setWarMode('stake')}
+            disabled={loading}
+            style={{
+              padding: isMobile() ? '6px 10px' : '8px 14px',
+              fontSize: isMobile() ? 12 : 14,
+              border: 'none',
+              background: warMode === 'stake' ? '#2196F3' : '#f5f5f5',
+              color: warMode === 'stake' ? '#fff' : '#333',
+              cursor: 'pointer',
+              fontWeight: 700
+            }}
+          >Stake</button>
+          <button
+            onClick={() => setWarMode('unstake')}
+            disabled={loading}
+            style={{
+              padding: isMobile() ? '6px 10px' : '8px 14px',
+              fontSize: isMobile() ? 12 : 14,
+              border: 'none',
+              background: warMode === 'unstake' ? '#ff9800' : '#f5f5f5',
+              color: warMode === 'unstake' ? '#fff' : '#333',
+              cursor: 'pointer',
+              fontWeight: 700
+            }}
+          >Unstake</button>
+        </div>
+        <div style={{ fontSize: isMobile() ? 12 : 13, color: '#666' }}>
+          Mode: {warMode === 'stake' ? 'Place/Support/Attack' : 'Decrease defense or remove your blocks'}
+        </div>
+      </div>
+
+      {/* Uyarı metni kaldırıldı: Digzone/Warzone ayrı gridler */}
       <div style={{
         fontSize: isMobile() ? 14 : 16,
         marginBottom: isMobile() ? "8px" : "12px",
                             color: currentStock > 0 ? "#2196f3" : "#ff5722",
           fontWeight: currentStock < 0 ? "bold" : 600
       }}>
-        💰 Total: {tokenBalance} | 🏗️ Used: {totalDefenseUsed} | ⚔️ Available: {currentStock >= 0 ? currentStock : `${currentStock} (NEGATIVE!)`}
+        💰 Total: {tokenBalance} | 🏗️ Used: {totalDefenseUsed} | Available: {currentStock >= 0 ? currentStock : `${currentStock} (NEGATIVE!)`}
       </div>
       <div className="gridb-wrapper" style={{
         width: '100%',
@@ -661,10 +948,16 @@ const GridB: React.FC<Props> = ({ totalBlocks, username, userColor, tokenBalance
             touchAction: 'none'
           }}>
         {blocks.map((index) => {
-          const filled = gridB[index];
+          const filled = (gridB[index] && typeof gridB[index] === 'object') ? gridB[index] : null;
           const isUserBlock = filled && filled.owner === username;
           const blockColor = filled && filled.owner && userColors[filled.owner] ? userColors[filled.owner] : "#f5f5f5";
           const isCastle = filled && filled.defense >= 10;
+
+          // Digzone/Warzone ayrımı: İlk 10x10 = Digzone, geri kalan = Warzone
+          const row = Math.floor(index / columnCount);
+          const col = index % columnCount;
+          const isDigzone = row < 10 && col < 10;
+          const isWarzone = !isDigzone;
           
           const fontSize = isMobile() 
             ? Math.max(4, Math.min(8, Math.floor(blockWidth * 0.3)))
@@ -673,13 +966,13 @@ const GridB: React.FC<Props> = ({ totalBlocks, username, userColor, tokenBalance
           return (
             <div
               key={index}
-              className={`grid-block${isUserBlock ? " my-block" : ""}`}
+              className={`grid-block${isUserBlock ? " my-block" : ""}${isDigzone ? " digzone-block" : " warzone-block"}`}
 
               style={{
-                backgroundColor: filled && filled.owner ? blockColor : "#f5f5f5",
-                border: `0.5px solid ${isCastle ? "#000" : "#ddd"}`,
-                background: filled && filled.owner ? blockColor : "#f5f5f5",
-                color: filled && filled.owner ? "#222" : "#aaa",
+                backgroundColor: filled && filled.owner ? blockColor : "#ffffff",
+                border: `0.5px solid ${filled && filled.owner ? (isCastle ? "#000" : "#999") : "#dddddd"}`,
+                background: filled && filled.owner ? blockColor : "#ffffff",
+                color: filled && filled.owner ? "#222" : "#888",
                 fontSize: fontSize,
                 lineHeight: 1,
                 overflow: "hidden",
@@ -706,12 +999,18 @@ const GridB: React.FC<Props> = ({ totalBlocks, username, userColor, tokenBalance
                   ? `Block #${index} - Owner: ${filled.owner}`
                   : `Block #${index}`
               }
-              onClick={() => handleBlockClick(index)}
+              onClick={(ev) => {
+                if (suppressNextClickRef.current) {
+                  ev.preventDefault();
+                  return;
+                }
+                handleBlockClick(index);
+              }}
               onTouchStart={(e) => handleTouchStart(e, index)}
               onTouchMove={handleTouchMove}
               onTouchEnd={(e) => handleTouchEnd(e, index)}
             >
-              {filled && filled.defense ? filled.defense : filled && filled.owner ? 1 : ''}
+              {filled && filled.owner ? (typeof filled.defense === 'number' ? filled.defense : 1) : ''}
             </div>
           );
         })}
@@ -773,7 +1072,7 @@ const GridB: React.FC<Props> = ({ totalBlocks, username, userColor, tokenBalance
             }}
           >
             {(() => {
-              const selectedBlock = gridB.find(b => b.index === selectedBlockIndex);
+              const selectedBlock = gridB.find(b => b && typeof b === 'object' && b.index === selectedBlockIndex);
               const isOwner = selectedBlock?.owner === username;
               const isEmpty = !selectedBlock?.owner;
               const isOthersBlock = selectedBlock?.owner && selectedBlock?.owner !== username;
@@ -785,7 +1084,7 @@ const GridB: React.FC<Props> = ({ totalBlocks, username, userColor, tokenBalance
               return (
                 <>
                   <h3 style={{ margin: '0 0 16px 0', color: '#333', fontSize: '20px' }}>
-                    {isCastle ? '🏰' : ''} Block #{selectedBlockIndex} {isCastle ? '🏰' : ''}
+                    Block #{selectedBlockIndex}
                   </h3>
                   {isEmpty ? (
                     <p style={{ margin: '8px 0 20px 0', color: '#666', fontSize: '16px' }}>Empty Block</p>
@@ -796,7 +1095,7 @@ const GridB: React.FC<Props> = ({ totalBlocks, username, userColor, tokenBalance
                       </p>
                       {isCastle && (
                         <p style={{ margin: '0', color: '#f57c00', fontSize: '14px', fontWeight: 'bold' }}>
-                          ✨ Castle: +1 auto-mining per day!
+                          Castle: +1 auto-mining per day
                         </p>
                       )}
                     </div>
@@ -807,61 +1106,113 @@ const GridB: React.FC<Props> = ({ totalBlocks, username, userColor, tokenBalance
                       </p>
                       {isCastle && (
                         <p style={{ margin: '0 0 8px 0', color: '#f57c00', fontSize: '14px', fontWeight: 'bold' }}>
-                          ⚡ Enemy Castle: Generates +1 block/day
+                          Enemy Castle: Generates +1 block/day
                         </p>
                       )}
                       {isFirstPlacement && isCastle && (
                         <p style={{ margin: '0', color: '#f44336', fontSize: '13px', fontStyle: 'italic' }}>
-                          🛡️ Castle Protection: Attack neighboring blocks first
+                          Castle Protection: Attack neighboring blocks first
                         </p>
                       )}
                     </div>
                   )}
                   
                   <div style={{ display: 'flex', gap: '12px', justifyContent: 'center', flexWrap: 'wrap' }}>
-                    {(isEmpty || isOthersBlock) && (
-                      <button 
-                        className="block-modal-button attack-button" 
-                        onClick={() => selectedBlockIndex !== null && handleBlockAction(selectedBlockIndex)}
-                        disabled={loading || (isFirstPlacement && isCastle)}
-                        style={{
-                          padding: '10px 20px',
-                          border: 'none',
-                          borderRadius: '6px',
-                          fontSize: '14px',
-                          fontWeight: '600',
-                          cursor: (loading || (isFirstPlacement && isCastle)) ? 'not-allowed' : 'pointer',
-                          backgroundColor: (isFirstPlacement && isCastle) ? '#9E9E9E' : '#f44336',
-                          color: 'white',
-                          minWidth: '80px',
-                          opacity: (isFirstPlacement && isCastle) ? 0.6 : 1,
-                        }}
-                        title={isFirstPlacement && isCastle ? "Cannot attack castles on first placement" : ""}
-                      >
-                        {loading ? "Processing..." : (isFirstPlacement && isCastle) ? "Protected" : "Attack"}
-                      </button>
+                    {warMode === 'stake' && (
+                      <>
+                        {(isEmpty || isOthersBlock) && (
+                          <button 
+                            className="block-modal-button attack-button" 
+                            onClick={() => selectedBlockIndex !== null && handleBlockAction(selectedBlockIndex)}
+                            disabled={loading || (isFirstPlacement && isCastle)}
+                            style={{
+                              padding: '10px 20px',
+                              border: 'none',
+                              borderRadius: '6px',
+                              fontSize: '14px',
+                              fontWeight: '600',
+                              cursor: (loading || (isFirstPlacement && isCastle)) ? 'not-allowed' : 'pointer',
+                              backgroundColor: (isFirstPlacement && isCastle) ? '#9E9E9E' : '#f44336',
+                              color: 'white',
+                              minWidth: '80px',
+                              opacity: (isFirstPlacement && isCastle) ? 0.6 : 1,
+                            }}
+                            title={isFirstPlacement && isCastle ? 'Cannot attack castles on first placement' : ''}
+                          >
+                            {loading ? 'Processing...' : (isFirstPlacement && isCastle) ? 'Protected' : (isEmpty ? 'Claim' : 'Attack')}
+                          </button>
+                        )}
+                        {isOwner && (
+                          <button
+                            className="block-modal-button support-button"
+                            onClick={() => selectedBlockIndex !== null && handleStake(selectedBlockIndex)}
+                            disabled={loading}
+                            style={{
+                              padding: '10px 20px',
+                              border: 'none',
+                              borderRadius: '6px',
+                              fontSize: '14px',
+                              fontWeight: '600',
+                              cursor: 'pointer',
+                              backgroundColor: (selectedBlock?.defense === 9) ? '#ff9800' : '#2196F3',
+                              color: 'white',
+                              minWidth: '80px',
+                            }}
+                            title={selectedBlock?.defense === 9 ? 'Upgrade to Castle! (+1 auto-mining/day)' : 'Increase defense by 1'}
+                          >
+                            {loading ? 'Processing...' : (selectedBlock?.defense === 9) ? 'Castle!' : 'Support'}
+                          </button>
+                        )}
+                      </>
                     )}
-                    {isOwner && (
-                      <button 
-                        className="block-modal-button support-button" 
-                        onClick={() => selectedBlockIndex !== null && handleBlockAction(selectedBlockIndex)}
-                        disabled={loading}
-                        style={{
-                          padding: '10px 20px',
-                          border: 'none',
-                          borderRadius: '6px',
-                          fontSize: '14px',
-                          fontWeight: '600',
-                          cursor: 'pointer',
-                          backgroundColor: (selectedBlock?.defense === 9) ? '#ff9800' : '#2196F3',
-                          color: 'white',
-                          minWidth: '80px',
-                        }}
-                        title={selectedBlock?.defense === 9 ? "Upgrade to Castle! (+1 auto-mining/day)" : "Increase defense by 1"}
-                      >
-                        {loading ? "Processing..." : (selectedBlock?.defense === 9) ? "🏰 Castle!" : "Support"}
-                      </button>
+
+                    {warMode === 'unstake' && isOwner && (
+                      <>
+                        {(selectedBlock?.defense || 1) > 1 && (
+                          <button 
+                            className="block-modal-button unstake-button" 
+                            onClick={() => selectedBlockIndex !== null && handleUnstake(selectedBlockIndex)}
+                            disabled={loading}
+                            style={{
+                              padding: '10px 20px',
+                              border: 'none',
+                              borderRadius: '6px',
+                              fontSize: '14px',
+                              fontWeight: '600',
+                              cursor: 'pointer',
+                              backgroundColor: '#ff9800',
+                              color: 'white',
+                              minWidth: '80px',
+                            }}
+                            title={isCastle ? 'Drop castle defense by 1' : 'Decrease defense by 1'}
+                          >
+                            {loading ? 'Processing...' : 'Unstake -1'}
+                          </button>
+                        )}
+                        {(selectedBlock?.defense || 1) === 1 && (
+                          <button 
+                            className="block-modal-button remove-button" 
+                            onClick={() => selectedBlockIndex !== null && handleRemove(selectedBlockIndex)}
+                            disabled={loading}
+                            style={{
+                              padding: '10px 20px',
+                              border: 'none',
+                              borderRadius: '6px',
+                              fontSize: '14px',
+                              fontWeight: '600',
+                              cursor: 'pointer',
+                              backgroundColor: '#e53935',
+                              color: 'white',
+                              minWidth: '80px',
+                            }}
+                            title={'Remove this block (full unstake)'}
+                          >
+                            {loading ? 'Processing...' : 'Remove'}
+                          </button>
+                        )}
+                      </>
                     )}
+
                     <button 
                       className="block-modal-button close-button" 
                       onClick={() => setShowBlockModal(false)}

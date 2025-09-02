@@ -1,0 +1,115 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://thisisthecoin.com/schemas/volchain-event.json",
+  "title": "Volchain Event (chain.log entry)",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "id": { "type": "integer", "minimum": 1 },
+    "prev_hash": { "type": ["string", "null"], "pattern": "^[0-9a-fA-F]{64}$" },
+    "hash": { "type": "string", "pattern": "^[0-9a-fA-F]{64}$" },
+    "ts": { "type": "integer", "description": "Unix epoch millis" },
+    "type": { "type": "string", "enum": ["mint", "burn", "transfer", "stake", "unstake"] },
+
+    "pubkey": { "type": "string", "pattern": "^[0-9a-fA-F]{64}$" },
+    "amount": { "type": "integer", "minimum": 0 },
+    "reason": { "type": "string" },
+    "username": { "type": "string" },
+    "gridIndex": { "type": "integer", "minimum": 0 },
+
+    "from": { "type": "string", "pattern": "^[0-9a-fA-F]{64}$" },
+    "to": { "type": "string", "pattern": "^[0-9a-fA-F]{64}$" },
+    "fromUser": { "type": "string" }
+  },
+
+  "oneOf": [
+    {
+      "title": "mint",
+      "properties": { "type": { "const": "mint" } },
+      "required": ["id", "prev_hash", "hash", "ts", "type", "pubkey", "amount" ]
+    },
+    {
+      "title": "burn",
+      "properties": { "type": { "const": "burn" } },
+      "required": ["id", "prev_hash", "hash", "ts", "type", "pubkey", "amount" ]
+    },
+    {
+      "title": "transfer",
+      "properties": { "type": { "const": "transfer" } },
+      "required": ["id", "prev_hash", "hash", "ts", "type", "from", "to", "amount" ]
+    },
+    {
+      "title": "stake",
+      "properties": { "type": { "const": "stake" } },
+      "required": ["id", "prev_hash", "hash", "ts", "type", "pubkey", "amount" ]
+    },
+    {
+      "title": "unstake",
+      "properties": { "type": { "const": "unstake" } },
+      "required": ["id", "prev_hash", "hash", "ts", "type", "pubkey", "amount" ]
+    }
+  ],
+
+  "examples": [
+    {
+      "id": 123,
+      "prev_hash": "dc14a0169ce40699fba4382ada87666c8908e815983f724aa5f83a4158078f51",
+      "hash": "f68e2012897a548ab49bd74ea0a217ccf8d18961978db92ecfc6b1112b16d191",
+      "ts": 1755258416698,
+      "type": "mint",
+      "pubkey": "4C4237301AAC8159305A65D62FB993E81EBBC6E8F7DF26F66EC24EC8B214B5B2",
+      "amount": 1,
+      "reason": "dig",
+      "username": "Vol",
+      "gridIndex": 1942
+    },
+    {
+      "id": 456,
+      "prev_hash": "f3d1c32f7e5148b34d5058da91f63b1fc0a36e534e6f504b752555c8b302c792",
+      "hash": "a56d24491bd13b6b72eb129e85dab4171dd0199339109e86c8072311f1599821",
+      "ts": 1755258416700,
+      "type": "burn",
+      "pubkey": "503B0F6914027CBA0232E3A1D41F3E4A9E78BFFAA1763AB922F295CC7621EF5C",
+      "amount": 1,
+      "reason": "warzone_attack_cost",
+      "username": "Volkan2"
+    },
+    {
+      "id": 789,
+      "prev_hash": "b81da7efc7f8cc1347e5bd9dc966b879464f80675705e5560ea3b8f460a500c0",
+      "hash": "74dc2fb27c2557fd40ca1f954467b69f0b02d9524789cb8e28acf82e8ecbaaec",
+      "ts": 1755262484986,
+      "type": "transfer",
+      "from": "4C4237301AAC8159305A65D62FB993E81EBBC6E8F7DF26F66EC24EC8B214B5B2",
+      "to": "8f264db82344b9b68c0351de645cd86b9981bcea8109c1fe898dc6c1a282e9a7",
+      "amount": 100,
+      "fromUser": "Vol"
+    },
+    {
+      "id": 901,
+      "prev_hash": "75a4b2df3caa724e59a734d0b60c48c2c895daf6d189caf5a76d95b365bfe945",
+      "hash": "b81da7efc7f8cc1347e5bd9dc966b879464f80675705e5560ea3b8f460a500c0",
+      "ts": 1755267277307,
+      "type": "stake",
+      "username": "Vacatay",
+      "pubkey": "8f264db82344b9b68c0351de645cd86b9981bcea8109c1fe898dc6c1a282e9a7",
+      "amount": 30,
+      "reason": "backfill"
+    },
+    {
+      "id": 902,
+      "prev_hash": "f9eec606d747ed8222d82f7de964598e998b0914d6729c88641e19610887a6e8",
+      "hash": "c132aa552b095055aae84d1a98c66463e3c30d5aacac1d51f85853edb88c94f0",
+      "ts": 1755333618544,
+      "type": "unstake",
+      "username": "Volkan2",
+      "pubkey": "503B0F6914027CBA0232E3A1D41F3E4A9E78BFFAA1763AB922F295CC7621EF5C",
+      "amount": 1,
+      "reason": "manual_unstake",
+      "gridIndex": 564
+    }
+  ]
+}
+
+
+

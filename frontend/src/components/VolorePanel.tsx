@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { withRetry } from './request';
 
 type Props = { username: string | null };
 
@@ -11,7 +12,8 @@ const VolorePanel: React.FC<Props> = ({ username }) => {
   const [used, setUsed] = useState<number>(0);
   const [available, setAvailable] = useState<number>(0);
   const [address, setAddress] = useState<string>('');
-  const [top, setTop] = useState<Holder[]>([]);
+  // const [top, setTop] = useState<Holder[]>([]);
+  const [topHolders, setTopHolders] = useState<Holder[]>([]);
   const [toPubkey, setToPubkey] = useState('');
   const [amount, setAmount] = useState<number>(0);
   const [txMsg, setTxMsg] = useState<string | null>(null);
@@ -26,35 +28,55 @@ const VolorePanel: React.FC<Props> = ({ username }) => {
         setLoading(true);
         setError(null);
 
-        // Volchain stats (single source of truth for total balance)
+        // Volchain stats (address only; total will be derived from Digzone grid)
         const volResp = await fetch(`/stats/volchain?username=${encodeURIComponent(username || '')}`);
         const vol = await volResp.json();
-        const volBalance: number = vol?.volchain?.currentUser?.balance ?? 0;
-        setTotal(volBalance);
         if (vol?.volchain?.currentUser?.pubkey) setAddress(vol.volchain.currentUser.pubkey);
 
-        // GridB for used (defense sum); available = balance - used
+        // GridB for used (defense sum)
         const gbResp = await fetch('/gridb');
         const gridb = await gbResp.json();
         const u = Array.isArray(gridb)
           ? gridb.filter((b: any) => b && b.owner === username).reduce((s: number, b: any) => s + (typeof b.defense === 'number' ? b.defense : 1), 0)
           : 0;
         setUsed(u);
-        setAvailable(Math.max(0, volBalance - u));
 
-        // Top list should match Top Miners (by mined blocks)
+        // Digzone grid for total (source of truth)
         try {
-          const tmResp = await fetch('/top-miners');
+          const gResp = await fetch('/grid');
+          const g = await gResp.json();
+          const mined = Array.isArray(g) ? g.filter((b: any) => b && b.dugBy === username).length : 0;
+          setTotal(mined);
+          setAvailable(mined - u);
+        } catch {}
+
+        // Top Volore Holders (Volchain)
+        try {
+          const tmResp = await fetch('/volchain/holders?limit=3');
           const tm = await tmResp.json();
           if (Array.isArray(tm)) {
-            const mapped: Holder[] = tm.slice(0, 3).map((m: any) => ({
-              name: m.name,
-              color: m.color || '#888',
-              // Reuse fields to avoid extra types: store count in balance, and name in pubkey placeholder
-              balance: m.count,
-              pubkey: m.name,
+            (window as any).__topHoldersCache = tm.map((h: any) => ({
+              name: h.name || (typeof h.pubkey === 'string' ? h.pubkey.slice(0,8) : '-'),
+              color: h.color || '#888',
+              balance: h.balance || 0,
+              pubkey: h.pubkey || ''
             }));
-            setTop(mapped);
+          }
+        } catch {}
+
+        // Top holders (by Volore balance on Volchain)
+        try {
+          const thResp = await fetch('/volchain/holders?limit=3');
+          const th = await thResp.json();
+          if (Array.isArray(th)) {
+            const mapped: Holder[] = th.map((h: any) => ({
+              name: h.name || (typeof h.pubkey === 'string' ? h.pubkey.slice(0,8) : '-'),
+              color: h.color || '#888',
+              balance: h.balance || 0,
+              pubkey: h.pubkey || ''
+            }));
+            setTopHolders(mapped);
+            try { (window as any).__topHoldersCache = mapped; } catch {}
           }
         } catch {}
       } catch (e: any) {
@@ -97,11 +119,7 @@ const VolorePanel: React.FC<Props> = ({ username }) => {
         return;
       }
       setConfirmOpen(false);
-      const resp = await fetch('/volchain/transfer', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Session-Token': sessionToken },
-        body: JSON.stringify({ toPubkey, amount })
-      });
+      const resp = await withRetry('/volchain/transfer', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: { toPubkey, amount } }, 1);
       const json = await resp.json();
       if (!resp.ok || json?.error) {
         setError(json?.error || 'Transfer failed');
@@ -211,11 +229,13 @@ const VolorePanel: React.FC<Props> = ({ username }) => {
         </div>
       )}
 
+      {/* Top Volore Miners section removed in favor of holders-only */}
+
       <div className="stats-section">
-        <h4 className="section-title">🏆 Top Volore Miners</h4>
+        <h4 className="section-title">🏅 Top Volore Holders</h4>
         <div className="top-miners-list">
-          {top.map((h, i) => (
-            <div key={h.pubkey} className="miner-item">
+          {topHolders.map((h, i) => (
+            <div key={h.pubkey + i} className="miner-item">
               <span className="miner-rank">{i + 1}</span>
               <div className="miner-color" style={{ backgroundColor: h.color || '#e0e0e0' }}></div>
               <span className="miner-name">{h.name}</span>

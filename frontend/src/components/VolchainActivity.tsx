@@ -1,8 +1,9 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
+import { withRetry } from './request';
 
 type Event = {
   ts: number;
-  type: 'mint' | 'burn' | 'transfer';
+  type: 'mint' | 'burn' | 'transfer' | 'stake' | 'unstake';
   reason?: string;
   username?: string;
   pubkey?: string;
@@ -11,6 +12,7 @@ type Event = {
   fromUser?: string;
   from?: string;
   to?: string;
+  toUser?: string;
 };
 
 const formatTs = (ts: number) => {
@@ -31,6 +33,11 @@ const shortHex = (v?: string, len: number = 6) => {
   return v.length > len ? `${v.slice(0, len)}…` : v;
 };
 
+const shortUser = (v?: string, len: number = 10) => {
+  if (!v || typeof v !== 'string') return '';
+  return v.length > len ? `${v.slice(0, len)}…` : v;
+};
+
 type Props = {
   autoRefreshMs?: number;
 };
@@ -39,6 +46,7 @@ const VolchainActivity: React.FC<Props> = ({ autoRefreshMs }) => {
   const [events, setEvents] = useState<Event[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [nextCursor, setNextCursor] = useState<number | null>(null);
   const lastSigRef = useRef<string>('');
 
   const buildSignature = useCallback((list: Event[]) => {
@@ -57,10 +65,11 @@ const VolchainActivity: React.FC<Props> = ({ autoRefreshMs }) => {
         setLoading(true);
         setError(null);
       }
-      const resp = await fetch('/volchain/events');
+      const resp = await withRetry(`/volchain/events?limit=50&_ts=${Date.now()}`,{ method: 'GET' }, 1);
       if (!resp.ok) throw new Error('Failed to load events');
       const data = await resp.json();
-      const incoming: Event[] = Array.isArray(data) ? data : [];
+      const incoming: Event[] = Array.isArray(data?.events) ? data.events : (Array.isArray(data) ? data : []);
+      if (typeof data?.nextCursor === 'number') setNextCursor(data.nextCursor);
       // Avoid re-render if unchanged
       const sig = buildSignature(incoming);
       if (sig !== lastSigRef.current) {
@@ -79,6 +88,17 @@ const VolchainActivity: React.FC<Props> = ({ autoRefreshMs }) => {
   useEffect(() => {
     fetchEvents();
   }, [fetchEvents]);
+  const loadMore = useCallback(async () => {
+    if (nextCursor === null) return;
+    try {
+      const resp = await withRetry(`/volchain/events?limit=50&cursor=${nextCursor}&_ts=${Date.now()}`, { method: 'GET' }, 1);
+      if (!resp.ok) return;
+      const data = await resp.json();
+      const incoming: Event[] = Array.isArray(data?.events) ? data.events : [];
+      if (typeof data?.nextCursor === 'number') setNextCursor(data.nextCursor); else setNextCursor(null);
+      if (incoming.length > 0) setEvents(prev => [...prev, ...incoming]);
+    } catch {}
+  }, [nextCursor]);
 
   useEffect(() => {
     if (!autoRefreshMs || autoRefreshMs <= 0) return;
@@ -98,7 +118,7 @@ const VolchainActivity: React.FC<Props> = ({ autoRefreshMs }) => {
       {error && <p style={{ color: '#c00' }}>❌ {error}</p>}
       <div style={{ maxHeight: 260, minHeight: 260, overflowY: 'auto', overflowX: 'hidden', marginTop: 6, border: '1px solid #eee', borderRadius: 6, padding: 6 }}>
         {events.length === 0 && !loading && <p>No events yet.</p>}
-        {events.slice(0, 50).map((e, idx) => {
+        {events.map((e, idx) => {
           const baseStyle: React.CSSProperties = {
             display: 'flex',
             alignItems: 'center',
@@ -118,13 +138,22 @@ const VolchainActivity: React.FC<Props> = ({ autoRefreshMs }) => {
           );
           let msg = '';
           if (e.type === 'mint') {
-            msg = `+${e.amount} to ${e.username || shortHex(e.pubkey)}`;
+            msg = `+${e.amount} to ${shortUser(e.username) || shortHex(e.pubkey)}`;
           } else if (e.type === 'burn') {
-            msg = `-${e.amount} from ${e.username || shortHex(e.pubkey)}`;
+            msg = `-${e.amount} from ${shortUser(e.username) || shortHex(e.pubkey)}`;
           } else if (e.type === 'transfer') {
-            const fromShort = e.fromUser || shortHex(e.from);
-            const toShort = shortHex(e.to);
-            msg = `${e.amount} from ${fromShort} to ${toShort}`;
+            const fromShort = shortUser(e.fromUser) || shortHex(e.from);
+            const toShort = shortUser((e as any).toUser) || shortHex(e.to);
+            msg = `${e.amount} ${fromShort}→${toShort}`;
+          } else if (e.type === 'stake') {
+            const amt = typeof e.amount === 'number' ? e.amount : 1;
+            const who = shortUser(e.username) || shortHex(e.pubkey);
+            msg = `+${amt} — Used +${amt} / Avail -${amt} — ${who}`;
+          } else if (e.type === 'unstake') {
+            const amt = typeof e.amount === 'number' ? e.amount : 1;
+            // Type column already shows UNSTAKE, message keeps it compact per request
+            const who = shortUser(e.username) || shortHex(e.pubkey);
+            msg = `+${amt} — Used -${amt} / Avail +${amt} — ${who}`;
           }
           return (
             <div key={idx} style={baseStyle}>
@@ -135,6 +164,11 @@ const VolchainActivity: React.FC<Props> = ({ autoRefreshMs }) => {
           );
         })}
       </div>
+      {nextCursor !== null && (
+        <div style={{ display: 'flex', justifyContent: 'center', marginTop: 6 }}>
+          <button className="settings-button" onClick={loadMore} style={{ fontSize: 12, padding: '6px 10px' }}>Load more</button>
+        </div>
+      )}
     </div>
   );
 };
