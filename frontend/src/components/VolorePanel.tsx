@@ -33,22 +33,30 @@ const VolorePanel: React.FC<Props> = ({ username }) => {
         const vol = await volResp.json();
         if (vol?.volchain?.currentUser?.pubkey) setAddress(vol.volchain.currentUser.pubkey);
 
-        // GridB for used (defense sum)
-        const gbResp = await fetch('/gridb');
-        const gridb = await gbResp.json();
-        const u = Array.isArray(gridb)
-          ? gridb.filter((b: any) => b && b.owner === username).reduce((s: number, b: any) => s + (typeof b.defense === 'number' ? b.defense : 1), 0)
-          : 0;
-        setUsed(u);
-
-        // Digzone grid for total (source of truth)
+        // Backend authoritative summary (owner/status + GridB defense)
+        let summed = false;
         try {
-          const gResp = await fetch('/grid');
-          const g = await gResp.json();
+          const sumResp = await fetch(`/api/volore/${encodeURIComponent(username || '')}`);
+          if (sumResp.ok) {
+            const sum = await sumResp.json();
+            if (sum && typeof sum.total === 'number') { setTotal(Number(sum.total)); summed = true; }
+            if (sum && typeof sum.used === 'number') setUsed(Number(sum.used));
+            if (sum && typeof sum.available === 'number') setAvailable(Number(sum.available));
+          }
+        } catch {}
+        if (!summed) {
+          // Fallback: derive from /grid and /gridb
+          const [gbResp, gResp] = await Promise.all([fetch('/gridb'), fetch('/grid')]);
+          const gridb = await gbResp.json().catch(() => []);
+          const g = await gResp.json().catch(() => []);
+          const u = Array.isArray(gridb)
+            ? gridb.filter((b: any) => b && b.owner === username).reduce((s: number, b: any) => s + (typeof b.defense === 'number' ? b.defense : 1), 0)
+            : 0;
           const mined = Array.isArray(g) ? g.filter((b: any) => b && b.dugBy === username).length : 0;
           setTotal(mined);
+          setUsed(u);
           setAvailable(mined - u);
-        } catch {}
+        }
 
         // Top Volore Holders (Volchain)
         try {

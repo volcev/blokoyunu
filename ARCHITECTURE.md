@@ -64,12 +64,22 @@
 
 ## Game Flows
 - Digzone mint (mine block): PATCH /grid/:index checks session, limit, castle bonus, marks block, writes DB, appends mint bundle (ledger-first + barrier). Daily limit: 20.
-- Castle bonus: On the first dig of the day, bonus is minted as a single aggregated MINT (amount = number of owned castles) with reason 'castle_bonus' (not N separate +1 entries).
+- Castle bonus: On the first dig of the day, each owned castle (defense ≥ 10) auto-mines +1 block. Grid auto-expands if needed. Bonus is minted as a single aggregated MINT (amount = number of owned castles) with reason 'castle_bonus'.
 - Warzone stake/unstake/attack: PATCH /gridb/:index with neighbor checks; POST /gridb/:index/unstake; DELETE /gridb/:index
 - Transfer: POST /volchain/transfer computes available and appends transfer
 
-## Error Handling / Pending Queue
-- Append failures are queued to mempool.jsonl and sealed by a background producer; audit logs kept. A periodic flush loop keeps mempool near-empty in mempool mode.
+## VolChain Core Events (Only These Are Persisted)
+- mint (reason: 'dig' | 'castle_bonus') → Volore balance increases
+- burn (reason: 'attack_burn_attacker' | 'attack_burn_defender') → Volore balance decreases  
+- transfer → Volore moves between users
+- stake/unstake operations are NOT written to VolChain; they're managed locally in GridB/JSON only
+
+## Block Producer & Mempool
+- Background producer seals mempool.jsonl → blocks every 1-2 seconds
+- Core event filter: drops non-core txs (stake/unstake/remove_block) during mempool load
+- Oversized tx skip: if a tx doesn't fit in current block, skip it and try next txs
+- Salvage mode: if batch application fails, apply txs one-by-one and drop permanently invalid ones
+- mempool.jsonl stores only core events; pending queue (volchain_pending.json) handles retry logic
 
 ## Security / Headers
 - X-Session-Token required for user mutations.
@@ -82,12 +92,17 @@
 - Nginx/PM2 recommended; routes exposed via Nginx host
   - Public domain: thisisthecoin.com
 
+## Persistence & Storage
+- JSON Files: db.json (Digzone + users), gridb.json (Warzone), accounts.json (derived balances)
+- PostgreSQL: Dual-write to dig_blocks, gridb_blocks, users, accounts, vol_events tables
+- VolChain: snapshot.json (balances/staked), chain.log (events), blocks/ (sealed), mempool.jsonl (pending)
+
 ## Schemas (brief)
-- Grid block: { index: number, dugBy: string|null, color?: string|null, visual?: any|null }
-- GridB block: { index: number, owner: string|null, defense?: number }
-- Volchain event (examples):
-  - mint { type:'mint', pubkey, amount, reason ('dig'|'castle_bonus'|'reset_reseed'|...), username?, gridIndex?, memo.toPubkey?, memo.op_id? }
-  - burn { type:'burn', pubkey, amount, reason, username? }
-  - transfer { type:'transfer', from, to, amount, fromUser? }
-  - stake/unstake { type:'stake'|'unstake', pubkey, amount, reason, username?, gridIndex? }
+- Grid block: { index: number, dugBy: string|null, owner: string|null, status: 'dug'|null, mined_seq: number, color?: string|null, visual?: any|null }
+- GridB block: { index: number, owner: string|null, defense: number, color?: string|null, visual?: any|null, userBlockIndex?: number }
+- VolChain core events (only these persist to chain):
+  - mint { type:'mint', from:'SYSTEM', amount, memo: { reason:'dig'|'castle_bonus', toPubkey, dig_id?, op_id } }
+  - burn { type:'burn', from: addr, amount, memo: { reason:'attack_burn_attacker'|'attack_burn_defender', op_id } }
+  - transfer { type:'transfer', from: addr, to: addr, amount, memo: { op_id } }
+- Non-core events (GridB/JSON only): stake, unstake, support, remove_block, manual_unstake
 

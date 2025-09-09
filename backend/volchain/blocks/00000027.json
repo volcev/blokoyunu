@@ -1,27 +1,27 @@
 {
   "height": 27,
-  "prev_hash": "2fe8ad5c172fdfad069f526028bde3922f0e7a49ae8150a614c5f272db77eeb3",
-  "hash": "45ebc7a9ff02a185df15bd5336c9e6d9ad747e7b5c1111af8169d1982148b04c",
-  "time": 1756756417002,
-  "txsHash": "6266279c9a1258e4b0b70cc745edbf57b87fa922e6b2d7e543469508c6d9d4bb",
+  "prev_hash": "39323e3d337318d0b8de7a8f6fa1099a800441a6cdfad10bc03b0db054ba542c",
+  "hash": "4482b9b18dd3a87c3ce4eede085fafe0d84a98a2ae9f3a9a40b273264b4d785c",
+  "time": 1756900738579,
+  "txsHash": "bac49cb0d8cc74b6e9aceb73f5282125ebf9989ec85098faaa3f688f080def5a",
   "validator": "LOCAL",
   "signature": null,
   "count": 1,
   "txs": [
     {
-      "type": "stake",
+      "type": "unstake",
       "from": "SYSTEM",
-      "pubkey": "TzOlsyud3+Cugqg4Me1ZdBUvbRf/ZzA4kmoo/ZfF7rI=",
+      "pubkey": "UDsPaRQCfLoCMuOh1B8+Sp54v/qhdjq5IvKVzHYh71w=",
       "amount": 1,
       "nonce": 0,
       "memo": {
-        "reason": "support",
-        "gridIndex": 2281,
-        "username": "Dgngntrkn",
-        "op_id": "7c6fe042-fde6-4652-a412-41c381c40163"
+        "reason": "remove_block",
+        "gridIndex": 88,
+        "username": "Volkan2",
+        "op_id": "99683bac-621e-4816-aea0-d11f12e6b38c"
       },
       "sig": null,
-      "ts": 1756756416398
+      "ts": 1756900738260
     }
   ]
 }

@@ -68,6 +68,34 @@
   }
 }
 
+.daily-limit-failed-visual {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 1.8em; /* Same size as success emoji */
+  animation: daily-limit-failed-fadeout 6s ease-out forwards;
+  pointer-events: none; /* Make sure it doesn't block clicks */
+  z-index: 5;
+  text-shadow: 0 0 5px rgba(255, 0, 0, 0.5); /* Red shadow for sad emoji */
+  color: #ff4444; /* Red color for the emoji */
+}
+
+@keyframes daily-limit-failed-fadeout {
+  0% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(0.5);
+  }
+  10%, 50% { /* Stay visible for ~3 seconds */
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1.1);
+  }
+  100% { /* Fade out for the last ~3 seconds */
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.5);
+  }
+}
+
 /* Fare ile üzerine gelme efektini sadece desktop'ta uygula */
 @media (hover: hover) {
   .grid-block:hover {

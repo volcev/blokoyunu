@@ -1,28 +1,27 @@
 {
   "height": 4,
-  "prev_hash": "96a84524a2ed373e458c6c63cdffe6ada33244578e9052ce4a76e0cab05a0267",
-  "hash": "d1822947b3e972debcbcd6924fb0c4f401b47243900982d47ea59fb2514e22ab",
-  "time": 1756741290094,
-  "txsHash": "2987bff4c8847c741a712edcd3b79860c84a7f4a8382c25b5018de32b38250ac",
+  "prev_hash": "5a800d70b24db73457a2acf1358267d8840736fa2be3571add77db69c742c568",
+  "hash": "8780dcb7578f3688fbc34e2ce7182762e3a15ffac0e1530811715e36be587b8a",
+  "time": 1756899460887,
+  "txsHash": "225c2ad149a5d9992d0177d418808a54cea1925cb69c9c9af9447e1550e87c66",
   "validator": "LOCAL",
   "signature": null,
   "count": 1,
   "txs": [
     {
-      "type": "mint",
+      "type": "stake",
       "from": "SYSTEM",
-      "to": null,
+      "pubkey": "UDsPaRQCfLoCMuOh1B8+Sp54v/qhdjq5IvKVzHYh71w=",
       "amount": 1,
       "nonce": 0,
       "memo": {
-        "reason": "dig",
-        "toPubkey": "TEI3MBqsgVkwWmXWL7mT6B67xuj33yb2bsJOyLIUtbI=",
-        "dig_id": "dig:Vol:4474",
-        "op_id": "cc3a7926-6158-453c-9a19-f333ec8b2527.dig"
+        "reason": "claim_ownerless",
+        "gridIndex": 38,
+        "username": "Volkan2",
+        "op_id": "70125b30-77d8-4a03-b3a5-c8ab6939aa92"
       },
-      "pubkey": "",
-      "sig": "",
-      "ts": 1756741290087
+      "sig": null,
+      "ts": 1756899460700
     }
   ]
 }

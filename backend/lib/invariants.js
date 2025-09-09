@@ -19,7 +19,17 @@ function resolveUsernameToPubkey(username, users) {
   if (!users) return null;
   const normalizedUsername = String(username).toLowerCase();
   const user = users.find(u => u && u.username && String(u.username).toLowerCase() === normalizedUsername);
-  if (user && user.powPubkey && /^[0-9a-fA-F]{64}$/.test(String(user.powPubkey))) return String(user.powPubkey).toLowerCase();
+  if (!user || !user.powPubkey) return null;
+  const key = String(user.powPubkey);
+  // If already 64-hex, normalize to lowercase
+  if (/^[0-9a-fA-F]{64}$/.test(key)) return key.toLowerCase();
+  // If base64 32-byte, convert to 64-hex lowercase
+  try {
+    const buf = Buffer.from(key, 'base64');
+    if (buf && buf.length === 32) {
+      return Buffer.from(buf).toString('hex').toLowerCase();
+    }
+  } catch {}
   return null;
 }
 

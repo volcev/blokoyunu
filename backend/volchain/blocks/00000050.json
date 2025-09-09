@@ -1,27 +1,28 @@
 {
   "height": 50,
-  "prev_hash": "2e8224811ce30a59f83c4891539051607ae088a8868f5afe997e73ed040b45ea",
-  "hash": "c768a1e1a247fc73ba981ec021d3fb924f2ac3721eda630c3ed69e0df10c681e",
-  "time": 1756756511027,
-  "txsHash": "8b68f4dc128f5f932363ff31dd6eaa93881dbd028dcba1bf380f4aa9dcc34163",
+  "prev_hash": "2739527b1cac9c9cd1980aeacfc50565f569b85b1d44897ad61f6818d2e96bd7",
+  "hash": "77b42260a9e2ba903ff194fe48d7d3d74c0ac7bc3492a27d3535e5ecaceb12d9",
+  "time": 1757354622326,
+  "txsHash": "28777159781d1cbeea99dfca3275d73017268294457ee4517add65a680fb3975",
   "validator": "LOCAL",
   "signature": null,
   "count": 1,
   "txs": [
     {
-      "type": "stake",
+      "type": "mint",
       "from": "SYSTEM",
-      "pubkey": "TzOlsyud3+Cugqg4Me1ZdBUvbRf/ZzA4kmoo/ZfF7rI=",
+      "to": null,
       "amount": 1,
       "nonce": 0,
       "memo": {
-        "reason": "support",
-        "gridIndex": 2133,
-        "username": "Dgngntrkn",
-        "op_id": "cca55683-964e-4fd4-a9db-f36a26c5578b"
+        "reason": "dig",
+        "toPubkey": "TEI3MBqsgVkwWmXWL7mT6B67xuj33yb2bsJOyLIUtbI=",
+        "dig_id": "dig:Vol:7055",
+        "op_id": "beda1b40-8bcc-45e3-95ae-03faf2510eb3.dig"
       },
-      "sig": null,
-      "ts": 1756756510415
+      "pubkey": "",
+      "sig": "",
+      "ts": 1757354622320
     }
   ]
 }

@@ -1,0 +1,13 @@
+5.9M ./frontend/node_modules/typescript/lib/tsc.js
+6.4M ./backend/aws/dist/aws
+6.4M ./backend/aws/dist/aws_completer
+7.8M ./frontend/node_modules/typescript/lib/typingsInstaller.js
+11M ./backend/aws/dist/_awscrt.abi3.so
+11M ./frontend/node_modules/typescript/lib/typescript.js
+11M ./frontend/node_modules/typescript/lib/typescriptServices.js
+12M ./frontend/node_modules/typescript/lib/tsserver.js
+12M ./frontend/node_modules/typescript/lib/tsserverlibrary.js
+17M ./backend/aws/dist/awscli/data/ac.index
+39M ./backend/aws/dist/libpython3.13.so.1.0
+60M ./backend/awscliv2.zip
+125M ./.git/objects/pack/pack-d45ab6b67e065388d122324e03c7f217b9363221.pack

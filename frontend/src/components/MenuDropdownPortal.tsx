@@ -9,6 +9,7 @@ interface MenuDropdownPortalProps {
   onSettings: () => void;
   onVolore: () => void;
   onVolchainActivity: () => void;
+  onTest: () => void;
   // Removed Tokenomics
   onContact: () => void;
   onLogout: () => void;
@@ -22,7 +23,7 @@ const MenuDropdownPortal: React.FC<MenuDropdownPortalProps> = ({
   onSettings,
   onVolore,
   onVolchainActivity,
-  
+  onTest,
   onContact,
   onLogout,
 }) => {
@@ -45,7 +46,7 @@ const MenuDropdownPortal: React.FC<MenuDropdownPortalProps> = ({
       <button onClick={onSettings}>Settings</button>
       <button onClick={onVolore}>Volore</button>
       <button onClick={onVolchainActivity}>Volchain Activity</button>
-      
+      <button onClick={onTest}>🗺️ Test</button>
       <button onClick={onContact}>Contact Us</button>
       <button
         onClick={onLogout}

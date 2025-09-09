@@ -34,8 +34,7 @@ function readGridB(totalBlocks) {
         arr.push({ index: i, owner: null, color: null, visual: null, userBlockIndex: null, defense: 0 });
       }
     }
-    // Persist normalization if anything changed length or nulls were replaced
-    fs.writeFileSync(GRIDB_FILE, JSON.stringify(arr, null, 2));
+    // Do not write during read; return normalized array only
     return arr;
   } catch (e) {
     const arr = Array.from({ length: readDB().grid.length }, (_, i) => ({ index: i, owner: null, color: null, visual: null, userBlockIndex: null, defense: 0 }));

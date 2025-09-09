@@ -282,10 +282,23 @@ function getFileSize(pathStr) {
   try { const st = fs.statSync(pathStr); return Number(st.size || 0); } catch { return 0; }
 }
 
+function isCoreTx(tx) {
+  try {
+    const t = String(tx?.type || '').toLowerCase();
+    const r = String(tx?.memo?.reason || '').toLowerCase();
+    if (t === 'mint') return r === 'dig' || r === 'castle_bonus';
+    if (t === 'transfer') return true;
+    if (t === 'burn') return r === 'attack_burn_attacker' || r === 'attack_burn_defender';
+    return false;
+  } catch { return false; }
+}
+
 function loadMempoolFromDisk() {
   ensureDirs();
   const txs = readJSONLines(MEMPOOL_FILE);
-  mempool = txs;
+  // Drop non-core/legacy ops to avoid blocking
+  mempool = Array.isArray(txs) ? txs.filter(isCoreTx) : [];
+  try { rewriteMempoolFile(); } catch {}
 }
 
 function rewriteMempoolFile() {
@@ -672,6 +685,9 @@ function applyTxToSnapshot(state, tx) {
     // Defender loses 1 block (burn, used -1)
     if (stk(state, defender) < 1) throw new Error('defender_insufficient_stake');
     setStk(state, defender, stk(state, defender) - 1);
+    // Also reduce defender's total balance to keep supply == Σ(balance)
+    if (bal(state, defender) < 1) throw new Error('defender_insufficient_balance');
+    setBal(state, defender, bal(state, defender) - 1);
     
     // Supply decreases by 2
     state.supply = Number(state.supply || 0) - 2;
@@ -864,7 +880,8 @@ function produceOneBlock(maxBatch = 100) {
         reason === 'dig' ||
         reason === 'castle_bonus' ||
         reason === 'attack_burn_attacker' ||
-        reason === 'attack_burn_defender'
+        reason === 'attack_burn_defender' ||
+        reason === 'seed'
       );
       let ok = false;
       if (reasonAllowed) {
@@ -876,15 +893,41 @@ function produceOneBlock(maxBatch = 100) {
       // Enforce per-block limits: count and bytes
       const tbytes = Buffer.byteLength(JSON.stringify(tx));
       if (verified.length >= (Number(MAX_TX_PER_BLOCK) || 1)) break;
-      if (bytesUsed + tbytes > (Number(MAX_BLOCK_BYTES) || (256*1024))) break;
+      // If this tx doesn't fit into the current block, skip it and continue
+      if (bytesUsed + tbytes > (Number(MAX_BLOCK_BYTES) || (256*1024))) {
+        continue;
+      }
       verified.push(tx);
       bytesUsed += tbytes;
     }
     if (verified.length === 0) return null;
 
-    // Apply block to snapshot
+    // Apply block to snapshot with salvage fallback
     const snap = snapshotBefore;
-    applyBlock(snap, verified);
+    try {
+      applyBlock(snap, verified);
+    } catch (err) {
+      // If batch application fails, salvage valid txs by applying one-by-one in order.
+      const ok = [];
+      const trial = deepClone(snapshotBefore);
+      for (const tx of verified) {
+        try {
+          prevalidateTxUsingState(trial, tx);
+          applyTxToSnapshot(trial, tx);
+          ok.push(tx);
+        } catch { /* drop permanently */ }
+      }
+      if (ok.length === 0) {
+        // Permanently drop this batch to unblock the queue
+        rewriteMempoolFile();
+        return null;
+      }
+      verified.length = 0; for (const t of ok) verified.push(t);
+      // Apply salvaged txs to base snapshot
+      applyBlock(snap, verified);
+      // Persist mempool shrink if any were dropped
+      rewriteMempoolFile();
+    }
 
     // Build header
     const nowTs = Date.now();
@@ -1207,6 +1250,8 @@ module.exports = {
   enqueueTx,
   drainTx,
   startProducer,
+  loadMempoolFromDisk,
+  produceOneBlock,
   translateEventToTx,
   canonicalTx,
   extractDigId,

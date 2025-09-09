@@ -139,15 +139,16 @@ router.post('/admin/volchain-align-from-digzone', (req, res) => {
       }
     }
 
-    // Rebuild balances/staked, clamp staked<=balance
+    // Rebuild balances/staked, clamp staked<=balance (normalize keys to lowercase 64-hex)
     const newBalances = {};
     const newStaked = {};
     const keys = new Set([...Object.keys(minedByPk), ...Object.keys(usedByPk)]);
     for (const pk of keys) {
+      const key = String(pk).toLowerCase();
       const bal = Math.max(0, Math.floor(Number(minedByPk[pk] || 0)));
       const used = Math.max(0, Math.floor(Number(usedByPk[pk] || 0)));
-      newBalances[pk] = bal;
-      newStaked[pk] = Math.min(used, bal);
+      newBalances[key] = bal;
+      newStaked[key] = Math.min(used, bal);
     }
 
     // Persist snapshot.json atomically

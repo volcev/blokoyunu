@@ -46,6 +46,7 @@ async function ledgerFirstCommitWithBarrier({ bundleFn, commitGameFn, guardFn, o
     return { ok:true, seal: sealResult, apply: applyResult, guard: guardResult, op_id };
   } catch (e) {
     const msg = String(e?.message || e);
+    console.error(`[LEDGER ERROR] op_id=${op_id}, error=${msg}, stack=${e?.stack}`);
     if (msg === 'duplicate_op_id' || msg === 'DIG_ID_DUPLICATE' || msg === 'duplicate_dig_id') {
       if (msg === 'duplicate_op_id') opIdDedupTotal++;
       if (msg === 'DIG_ID_DUPLICATE' || msg === 'duplicate_dig_id') digIdDuplicateTotal++;

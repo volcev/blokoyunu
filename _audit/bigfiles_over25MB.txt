@@ -1,0 +1,3 @@
+38.6 MB	./backend/aws/dist/libpython3.13.so.1.0
+59.3 MB	./backend/awscliv2.zip
+124.9 MB	./.git/objects/pack/pack-d45ab6b67e065388d122324e03c7f217b9363221.pack

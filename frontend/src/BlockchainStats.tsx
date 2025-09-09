@@ -63,9 +63,10 @@ const BlockchainStats: React.FC<BlockchainStatsProps> = ({ isVisible, onClose, u
       const url = username 
         ? `/stats/volchain?username=${encodeURIComponent(username)}`
         : '/stats/volchain';
-      const [statsResp, holdersResp] = await Promise.all([
+      const [statsResp, holdersResp, voloreSumResp] = await Promise.all([
         withRetry(url, { method: 'GET' }, 1),
-        withRetry('/volchain/holders?limit=3', { method: 'GET' }, 1)
+        withRetry('/api/volore/top?limit=3', { method: 'GET' }, 1),
+        username ? withRetry(`/api/volore/${encodeURIComponent(username)}`, { method: 'GET' }, 1) : Promise.resolve({ ok: false, json: async () => ({}) } as any)
       ]);
       const data: StatsResponse = await statsResp.json();
       if (Array.isArray(holdersResp)) {
@@ -74,22 +75,36 @@ const BlockchainStats: React.FC<BlockchainStatsProps> = ({ isVisible, onClose, u
       const holdersJson = await holdersResp.json().catch(() => []);
       if (Array.isArray(holdersJson)) {
         setHolders(holdersJson.map((h: any) => ({
-          name: h?.name || (typeof h?.pubkey === 'string' ? h.pubkey.slice(0,8) : ''),
-          balance: Number(h?.balance) || 0,
-          color: h?.color || '#e0e0e0',
-          pubkey: h?.pubkey || ''
+          name: h?.username || '-',
+          balance: Number(h?.total) || 0,
+          color: '#e0e0e0',
+          pubkey: ''
         })));
-      } else {
-        setHolders([]);
-      }
+      } else { setHolders([]); }
       
       if (data.success) {
         setStats(data.grid);
         setSource(data.source === 'volchain' ? '🔗 Volchain' : '💾 Local');
+        // Prefer backend summary for current user; fallback to volchain/grid if unavailable
+        try {
+          let userBalance: number | null = null;
+          if ((voloreSumResp as any)?.ok) {
+            const sum = await (voloreSumResp as any).json().catch(() => ({}));
+            if (sum && typeof sum.total === 'number') userBalance = Number(sum.total);
+          }
+          if (userBalance == null) {
+            const vcBalance = Number((data as any)?.volchain?.currentUser?.balance);
+            if (!Number.isNaN(vcBalance) && Number.isFinite(vcBalance)) userBalance = vcBalance;
+          }
+          if (userBalance == null) {
+            const gridUserBlocks = Number((data as any)?.grid?.currentUser?.totalBlocks);
+            if (!Number.isNaN(gridUserBlocks) && Number.isFinite(gridUserBlocks)) userBalance = gridUserBlocks;
+          }
+          if (userBalance != null) setChainUserBalance(userBalance);
+        } catch {}
+        // Keep total supply display from chain snapshot if available
         const vt = Number(data?.volchain?.totalSupply || 0);
         setChainTotal(vt);
-        const ub = Number(data?.volchain?.currentUser?.balance || 0);
-        setChainUserBalance(ub);
         const minedBlocks = Number(data?.grid?.minedBlocks || 0);
         setIsSyncing(vt > 0 && minedBlocks >= 0 && vt !== minedBlocks);
       } else {

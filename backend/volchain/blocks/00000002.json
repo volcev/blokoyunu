@@ -1,116 +1,28 @@
 {
   "height": 2,
-  "prev_hash": "839507d06f6e0e3ecb9e0e802461cbf8cb92900d32fdc47ad820847afd6d7c8d",
-  "hash": "5a6f985e3014bf74c8982851989f75e3722beb0738acb0fccc9be93d92fe36c6",
-  "time": 1756741171299,
-  "txsHash": "9f7727d685c69d82c64518265e6e71b0a64f284b6434a76f3538b73c5102eb22",
+  "prev_hash": "2e600fd58989957c186df8ae90afae2af7e8feb0db69e2de43c93f6b57196c24",
+  "hash": "5b734ab7b659726d38cb7f0b0457d5e0b6083188df7116634c7aed8311a56fca",
+  "time": 1756899311228,
+  "txsHash": "2f5ffbc2ab7e1b9f62476273e41f2828d688bf19afd9778f9e9b324c61473875",
   "validator": "LOCAL",
   "signature": null,
-  "count": 8,
+  "count": 1,
   "txs": [
     {
-      "type": "stake",
+      "type": "mint",
       "from": "SYSTEM",
-      "pubkey": "FRIvciDhPRhuI6XY+e/vaivcG+5nMKp2UW1dl7FXRnw=",
-      "amount": 156,
+      "to": null,
+      "amount": 1,
       "nonce": 0,
       "memo": {
-        "reason": "reset_reseed",
-        "username": "KG"
+        "reason": "dig",
+        "toPubkey": "UDsPaRQCfLoCMuOh1B8+Sp54v/qhdjq5IvKVzHYh71w=",
+        "dig_id": "dig:Volkan2:2784",
+        "op_id": "aced2679-4f5f-4142-8b1e-413c1cf1c497.dig"
       },
-      "sig": null,
-      "ts": 1756741171289
-    },
-    {
-      "type": "stake",
-      "from": "SYSTEM",
-      "pubkey": "TEI3MBqsgVkwWmXWL7mT6B67xuj33yb2bsJOyLIUtbI=",
-      "amount": 376,
-      "nonce": 0,
-      "memo": {
-        "reason": "reset_reseed",
-        "username": "Vol"
-      },
-      "sig": null,
-      "ts": 1756741171291
-    },
-    {
-      "type": "stake",
-      "from": "SYSTEM",
-      "pubkey": "UDsPaRQCfLoCMuOh1B8+Sp54v/qhdjq5IvKVzHYh71w=",
-      "amount": 624,
-      "nonce": 0,
-      "memo": {
-        "reason": "reset_reseed",
-        "username": "Volkan2"
-      },
-      "sig": null,
-      "ts": 1756741171292
-    },
-    {
-      "type": "stake",
-      "from": "SYSTEM",
-      "pubkey": "jyZNuCNEubaMA1HeZFzYa5mBvOqBCcH+iY3GwaKC6ac=",
-      "amount": 101,
-      "nonce": 0,
-      "memo": {
-        "reason": "reset_reseed",
-        "username": "Vacatay"
-      },
-      "sig": null,
-      "ts": 1756741171292
-    },
-    {
-      "type": "stake",
-      "from": "SYSTEM",
-      "pubkey": "TzOlsyud3+Cugqg4Me1ZdBUvbRf/ZzA4kmoo/ZfF7rI=",
-      "amount": 1577,
-      "nonce": 0,
-      "memo": {
-        "reason": "reset_reseed",
-        "username": "Dgngntrkn"
-      },
-      "sig": null,
-      "ts": 1756741171293
-    },
-    {
-      "type": "stake",
-      "from": "SYSTEM",
-      "pubkey": "QfNCGEPTZd1DBa1j5R9SRUYhy76bibXmmzj7YD/qyBE=",
-      "amount": 31,
-      "nonce": 0,
-      "memo": {
-        "reason": "reset_reseed",
-        "username": "CV"
-      },
-      "sig": null,
-      "ts": 1756741171294
-    },
-    {
-      "type": "stake",
-      "from": "SYSTEM",
-      "pubkey": "+dlThFzyVe88PjTe1gbuA6nbhZa9i6Cl6/YHsL+d714=",
-      "amount": 111,
-      "nonce": 0,
-      "memo": {
-        "reason": "reset_reseed",
-        "username": "Selin"
-      },
-      "sig": null,
-      "ts": 1756741171295
-    },
-    {
-      "type": "stake",
-      "from": "SYSTEM",
-      "pubkey": "fgnJKOSEyOcUgTnkGcBTJlVj8G9lPVnVOCWLc5cJxeo=",
-      "amount": 16,
-      "nonce": 0,
-      "memo": {
-        "reason": "reset_reseed",
-        "username": "Tuba-1707"
-      },
-      "sig": null,
-      "ts": 1756741171296
+      "pubkey": "",
+      "sig": "",
+      "ts": 1756899311220
     }
   ]
 }

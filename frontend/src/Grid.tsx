@@ -61,6 +61,7 @@ const Grid: React.FC<Props> = ({ username, userColor, showSettings, setShowSetti
   const [isMining, setIsMining] = useState<boolean>(false);
   const [selectedBlockIndex, setSelectedBlockIndex] = useState<number | null>(null);
   const [newlyDugBlocks, setNewlyDugBlocks] = useState<Set<number>>(new Set());
+  const [dailyLimitFailedBlocks, setDailyLimitFailedBlocks] = useState<Set<number>>(new Set());
   
   // Block Info Modal State
   const [showBlockModal, setShowBlockModal] = useState<boolean>(false);
@@ -211,18 +212,16 @@ const Grid: React.FC<Props> = ({ username, userColor, showSettings, setShowSetti
       );
       setBlockStates(newStates);
       setBlockData(data);
-      // Update token balance from Volchain (Single Source of Truth)
+      // Update token balance from backend summary (owner/status + GridB defense)
       try {
-        const volchainRes = await withRetry(`/volchain/user/${username}`, { method: 'GET' }, 1);
-        if (volchainRes.ok) {
-          const volchainData = await volchainRes.json();
-          setTokenBalance(volchainData.balance || 0);
+        const sumRes = await withRetry(`/api/volore/${username}`, { method: 'GET' }, 1);
+        if (sumRes.ok) {
+          const sum = await sumRes.json();
+          setTokenBalance(Number(sum?.total || 0));
         } else {
-          // Fallback to Digzone count for compatibility
           setTokenBalance(data.filter((block) => block.dugBy === username).length);
         }
       } catch {
-        // Fallback to Digzone count for compatibility
         setTokenBalance(data.filter((block) => block.dugBy === username).length);
       }
       const dugCount = data.filter((block) => block.dugBy !== null).length;
@@ -248,9 +247,19 @@ const Grid: React.FC<Props> = ({ username, userColor, showSettings, setShowSetti
     fetchGrid();
   }, [fetchGrid]);
 
-  // Also update tokenBalance when blockData changes
+  // Also update tokenBalance when blockData changes (re-query backend summary)
   useEffect(() => {
-    setTokenBalance(blockData.filter((block) => block.dugBy === username).length);
+    (async () => {
+      try {
+        const sumRes = await withRetry(`/api/volore/${username}`, { method: 'GET' }, 1);
+        if (sumRes.ok) {
+          const sum = await sumRes.json();
+          setTokenBalance(Number(sum?.total || 0));
+          return;
+        }
+      } catch {}
+      setTokenBalance(blockData.filter((block) => block.dugBy === username).length);
+    })();
   }, [blockData, username, setTokenBalance]);
 
   useEffect(() => {
@@ -359,6 +368,15 @@ const Grid: React.FC<Props> = ({ username, userColor, showSettings, setShowSetti
               }
               if (response.status === 429) {
                 alert(result?.error || 'Daily mining limit reached');
+                // Show sad emoji for daily limit failure
+                setDailyLimitFailedBlocks(prev => new Set(prev).add(index));
+                setTimeout(() => {
+                  setDailyLimitFailedBlocks(prev => {
+                    const newSet = new Set(prev);
+                    newSet.delete(index);
+                    return newSet;
+                  });
+                }, 6000);
                 return;
               }
               throw new Error(result.error || "Submitting block failed");
@@ -433,6 +451,15 @@ const Grid: React.FC<Props> = ({ username, userColor, showSettings, setShowSetti
           }
           if (response.status === 429) {
             alert(result?.error || 'Daily mining limit reached');
+            // Show sad emoji for daily limit failure
+            setDailyLimitFailedBlocks(prev => new Set(prev).add(index));
+            setTimeout(() => {
+              setDailyLimitFailedBlocks(prev => {
+                const newSet = new Set(prev);
+                newSet.delete(index);
+                return newSet;
+              });
+            }, 6000);
             newStates[index] = "idle";
             setBlockStates(newStates);
             return;
@@ -541,6 +568,9 @@ const Grid: React.FC<Props> = ({ username, userColor, showSettings, setShowSetti
                 {newlyDugBlocks.has(index) && (
                   <div className="newly-dug-visual">😊</div>
                 )}
+                {dailyLimitFailedBlocks.has(index) && (
+                  <div className="daily-limit-failed-visual">😞</div>
+                )}
               </div>
             </div>
           );
@@ -603,6 +633,14 @@ const Grid: React.FC<Props> = ({ username, userColor, showSettings, setShowSetti
               outline: 'none',
             }}
           >
+            <button
+              className="modal-close-x"
+              onClick={() => setShowBlockModal(false)}
+              aria-label="Close"
+              style={{ position: 'absolute', top: 8, right: 8 }}
+            >
+              ×
+            </button>
             <h3 style={{ margin: '0 0 16px 0', color: '#333', fontSize: '20px' }}>
               Block #{selectedBlock.index}
             </h3>
@@ -635,23 +673,6 @@ const Grid: React.FC<Props> = ({ username, userColor, showSettings, setShowSetti
                   {isMining ? (USE_POW_MINING ? `Mining... (${miningStatus})` : "Mining...") : "Dig"}
                 </button>
               )}
-              <button 
-                className="block-modal-button close-button" 
-                onClick={() => setShowBlockModal(false)}
-                style={{
-                  padding: '10px 20px',
-                  border: 'none',
-                  borderRadius: '6px',
-                  fontSize: '14px',
-                  fontWeight: '600',
-                  cursor: 'pointer',
-                  backgroundColor: '#9E9E9E',
-                  color: 'white',
-                  minWidth: '80px',
-                }}
-              >
-                Close
-              </button>
             </div>
           </div>
         </div>,

@@ -471,6 +471,74 @@ const GridB: React.FC<Props> = ({ totalBlocks, username, userColor, tokenBalance
     setLoading(false);
   }, [loading, gridB, setBlockData, setTokenBalance, username]);
 
+  // Upgrade to Castle (stake repeatedly until defense reaches 10 or stock runs out)
+  const handleUpgradeToCastle = useCallback(async (index: number) => {
+    if (loading) return;
+    const selectedBlock = (gridB[index] && typeof gridB[index] === 'object') ? gridB[index] : null;
+    if (!selectedBlock || selectedBlock.owner !== username) return;
+
+    const currentDefense = typeof selectedBlock.defense === 'number' ? selectedBlock.defense : 1;
+    if (currentDefense >= 10) {
+      alert('🏰 Already a castle.');
+      return;
+    }
+
+    // Calculate how many stakes we can perform right now
+    const needed = Math.max(0, 10 - currentDefense);
+    const canUse = Math.max(0, currentStock);
+    const steps = Math.min(needed, canUse);
+    if (steps <= 0) {
+      alert('⚠️ No available stock to upgrade.');
+      return;
+    }
+
+    setShowBlockModal(false);
+    setLoading(true);
+    await new Promise(resolve => setTimeout(resolve, 100));
+
+    let performed = 0;
+    for (let i = 0; i < steps; i++) {
+      try {
+        const res = await withRetry(`/gridb/${index}/stake`, { method: 'POST', headers: { 'Content-Type': 'application/json' } }, 1);
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({} as any));
+          if (err?.error === 'guard_system_failed') {
+            // brief backoff and retry this iteration once
+            await new Promise(r => setTimeout(r, 800));
+            const retry = await withRetry(`/gridb/${index}/stake`, { method: 'POST', headers: { 'Content-Type': 'application/json' } }, 1);
+            if (!retry.ok) break;
+          } else {
+            break;
+          }
+        }
+        performed++;
+      } catch {
+        // network hiccup: stop the batch
+        break;
+      }
+    }
+
+    // Refresh data after batch
+    try {
+      await fetchGridB();
+      const gridRes = await withRetry('/grid', { method: 'GET', requireOpId: false }, 1);
+      if (gridRes.ok) {
+        const gridData = await gridRes.json();
+        setBlockData(gridData);
+        const userGridBlocks = gridData.filter((block: any) => block.dugBy === username);
+        const newTokenBalance = userGridBlocks.length;
+        setTokenBalance(newTokenBalance);
+      }
+    } catch {}
+
+    if (performed < steps) {
+      // Partial success feedback
+      try { alert(`Upgraded ${performed} step(s).`); } catch {}
+    }
+
+    setLoading(false);
+  }, [loading, gridB, setBlockData, setTokenBalance, username, currentStock]);
+
   // Unstake (defense -1) for own block
   const handleUnstake = useCallback(async (index: number) => {
     if (loading) return;
@@ -524,6 +592,63 @@ const GridB: React.FC<Props> = ({ totalBlocks, username, userColor, tokenBalance
     setLoading(false);
   }, [loading, gridB, setBlockData, setTokenBalance, username]);
 
+  // Batch Unstake: perform multiple -1 steps safely
+  const handleBatchUnstake = useCallback(async (index: number, stepsRequested: number) => {
+    if (loading) return;
+    const selectedBlock = (gridB[index] && typeof gridB[index] === 'object') ? gridB[index] : null;
+    if (!selectedBlock || selectedBlock.owner !== username) return;
+
+    const currentDefense = typeof selectedBlock.defense === 'number' ? selectedBlock.defense : 1;
+    const maxSteps = Math.max(0, currentDefense - 1); // cannot go below 1 via unstake
+    const steps = Math.min(Math.max(0, stepsRequested), maxSteps);
+    if (steps <= 0) return;
+
+    setShowBlockModal(false);
+    setLoading(true);
+    await new Promise(resolve => setTimeout(resolve, 100));
+
+    let performed = 0;
+    for (let i = 0; i < steps; i++) {
+      try {
+        const res = await withRetry(`/gridb/${index}/unstake`, { method: 'POST', headers: { 'Content-Type': 'application/json' } }, 1);
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({} as any));
+          if (err?.error === 'guard_system_failed') {
+            await new Promise(r => setTimeout(r, 800));
+            const retry = await withRetry(`/gridb/${index}/unstake`, { method: 'POST', headers: { 'Content-Type': 'application/json' } }, 1);
+            if (!retry.ok) break;
+          } else {
+            break;
+          }
+        }
+        performed++;
+      } catch {
+        break;
+      }
+    }
+
+    // Refresh data
+    try {
+      await fetchGridB();
+      const gridRes = await withRetry('/grid', { method: 'GET', requireOpId: false }, 1);
+      if (gridRes.ok) {
+        const gridData = await gridRes.json();
+        setBlockData(gridData);
+        const userGridBlocks = gridData.filter((block: any) => block.dugBy === username);
+        const newTokenBalance = userGridBlocks.length;
+        setTokenBalance(newTokenBalance);
+      }
+    } catch {}
+
+    if (performed < stepsRequested) {
+      try { alert(`Unstaked ${performed} step(s).`); } catch {}
+    }
+
+    setLoading(false);
+  }, [loading, gridB, setBlockData, setTokenBalance, username]);
+
+  
+
   // Remove block (full unstake) for own block with defense 1
   const handleRemove = useCallback(async (index: number) => {
     if (loading) return;
@@ -576,6 +701,27 @@ const GridB: React.FC<Props> = ({ totalBlocks, username, userColor, tokenBalance
     }
     setLoading(false);
   }, [loading, gridB, setBlockData, setTokenBalance, username]);
+
+  // Unstake to 1 (convenience) and optionally remove
+  const handleUnstakeToOne = useCallback(async (index: number, removeAfter: boolean = false) => {
+    if (loading) return;
+    const selectedBlock = (gridB[index] && typeof gridB[index] === 'object') ? gridB[index] : null;
+    if (!selectedBlock || selectedBlock.owner !== username) return;
+    const currentDefense = typeof selectedBlock.defense === 'number' ? selectedBlock.defense : 1;
+    const steps = Math.max(0, currentDefense - 1);
+    if (steps === 0) {
+      if (removeAfter) {
+        await handleRemove(index);
+      }
+      return;
+    }
+
+    await handleBatchUnstake(index, steps);
+    if (removeAfter) {
+      await new Promise(r => setTimeout(r, 150));
+      await handleRemove(index);
+    }
+  }, [loading, gridB, handleBatchUnstake, handleRemove, username]);
 
   const [touchStartPos, setTouchStartPos] = useState<{ x: number; y: number; time: number } | null>(null);
   const [isMultiTouch, setIsMultiTouch] = useState(false);
@@ -1071,6 +1217,14 @@ const GridB: React.FC<Props> = ({ totalBlocks, username, userColor, tokenBalance
               outline: 'none',
             }}
           >
+            <button
+              className="modal-close-x"
+              onClick={() => setShowBlockModal(false)}
+              aria-label="Close"
+              style={{ position: 'absolute', top: 8, right: 8 }}
+            >
+              ×
+            </button>
             {(() => {
               const selectedBlock = gridB.find(b => b && typeof b === 'object' && b.index === selectedBlockIndex);
               const isOwner = selectedBlock?.owner === username;
@@ -1163,6 +1317,27 @@ const GridB: React.FC<Props> = ({ totalBlocks, username, userColor, tokenBalance
                             {loading ? 'Processing...' : (selectedBlock?.defense === 9) ? 'Castle!' : 'Support'}
                           </button>
                         )}
+                        {isOwner && ((selectedBlock?.defense || 1) < 10) && (
+                          <button
+                            className="block-modal-button support-button"
+                            onClick={() => selectedBlockIndex !== null && handleUpgradeToCastle(selectedBlockIndex)}
+                            disabled={loading || currentStock <= 0}
+                            style={{
+                              padding: '10px 20px',
+                              border: 'none',
+                              borderRadius: '6px',
+                              fontSize: '14px',
+                              fontWeight: '600',
+                              cursor: (loading || currentStock <= 0) ? 'not-allowed' : 'pointer',
+                              backgroundColor: '#673AB7',
+                              color: 'white',
+                              minWidth: '80px',
+                            }}
+                            title={`Upgrade with up to ${Math.min(Math.max(0, 10 - (selectedBlock?.defense || 1)), Math.max(0, currentStock))} support(s) to reach Castle`}
+                          >
+                            {loading ? 'Processing...' : 'Upgrade to Castle'}
+                          </button>
+                        )}
                       </>
                     )}
 
@@ -1186,13 +1361,13 @@ const GridB: React.FC<Props> = ({ totalBlocks, username, userColor, tokenBalance
                             }}
                             title={isCastle ? 'Drop castle defense by 1' : 'Decrease defense by 1'}
                           >
-                            {loading ? 'Processing...' : 'Unstake -1'}
+                            {loading ? 'Processing...' : 'Unstake'}
                           </button>
                         )}
-                        {(selectedBlock?.defense || 1) === 1 && (
-                          <button 
-                            className="block-modal-button remove-button" 
-                            onClick={() => selectedBlockIndex !== null && handleRemove(selectedBlockIndex)}
+                        {(
+                          <button
+                            className="block-modal-button remove-button"
+                            onClick={() => selectedBlockIndex !== null && handleUnstakeToOne(selectedBlockIndex, true)}
                             disabled={loading}
                             style={{
                               padding: '10px 20px',
@@ -1201,35 +1376,19 @@ const GridB: React.FC<Props> = ({ totalBlocks, username, userColor, tokenBalance
                               fontSize: '14px',
                               fontWeight: '600',
                               cursor: 'pointer',
-                              backgroundColor: '#e53935',
+                              backgroundColor: '#d32f2f',
                               color: 'white',
                               minWidth: '80px',
                             }}
-                            title={'Remove this block (full unstake)'}
+                            title={'Unstake all (remove block)'}
                           >
-                            {loading ? 'Processing...' : 'Remove'}
+                            {loading ? 'Processing...' : 'Unstake All'}
                           </button>
                         )}
                       </>
                     )}
 
-                    <button 
-                      className="block-modal-button close-button" 
-                      onClick={() => setShowBlockModal(false)}
-                      style={{
-                        padding: '10px 20px',
-                        border: 'none',
-                        borderRadius: '6px',
-                        fontSize: '14px',
-                        fontWeight: '600',
-                        cursor: 'pointer',
-                        backgroundColor: '#9E9E9E',
-                        color: 'white',
-                        minWidth: '80px',
-                      }}
-                    >
-                      Close
-                    </button>
+                    {/* Close button removed; red X at top-right */}
                   </div>
                 </>
               );

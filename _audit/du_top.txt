@@ -1,0 +1,10 @@
+4.0K	.gitignore
+8.0K	ARCHITECTURE.md
+8.0K	docs
+8.0K	sessions.json
+12K	schemas
+16K	.github
+7.0M	_audit
+127M	.git
+371M	frontend
+1.1G	backend

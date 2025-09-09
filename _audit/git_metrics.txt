@@ -1,0 +1,15 @@
+[du .git]
+127M	.git
+
+[git count-objects -vH]
+count: 0
+size: 0 bytes
+in-pack: 14152
+packs: 1
+size-pack: 125.30 MiB
+prune-packable: 0
+garbage: 0
+size-garbage: 0 bytes
+
+[LFS kontrol: .gitattributes]
+yok

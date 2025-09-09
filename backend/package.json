@@ -5,8 +5,14 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "start": "node server.js",
+    "start:dual": "STORE_MODE=dual node server.js",
+    "start:pg": "STORE_MODE=pg node server.js",
     "test:prop:loop": "node backend/test_property_runner.js --steps=500 --users=5 --max-retries=50",
-    "test:prod:vv": "node tools/test_prod_vv.js"
+    "test:prod:vv": "node tools/test_prod_vv.js",
+    "migrate:pg": "node tools/migrate_json_to_pg.js",
+    "backfill:users": "node tools/users_backfill_to_pg.js",
+    "reconcile:once": "node tools/reconcile_json_pg.js",
+    "verify:pg": "node tools/verify_pg_consistency.js"
   },
   "keywords": [],
   "author": "",
@@ -15,6 +21,7 @@
   "dependencies": {
     "@noble/ed25519": "^2.3.0",
     "@noble/hashes": "^1.8.0",
+    "async-mutex": "^0.4.0",
     "axios": "^1.11.0",
     "bcrypt": "^6.0.0",
     "bech32": "^2.0.0",
@@ -22,6 +29,6 @@
     "express": "^5.1.0",
     "noble-ed25519": "^1.2.6",
     "nodemailer": "^7.0.4",
-    "async-mutex": "^0.4.0"
+    "pg": "^8.16.3"
   }
 }

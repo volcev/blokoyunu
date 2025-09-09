@@ -46,6 +46,7 @@ function processCastleBonus(username, data, excludeIndex = -1) {
         // Sync GridB to the same new length
         const gridbExpanded = readGridB(targetLength);
         writeGridB(gridbExpanded);
+        try { require('./lib/store').buildStore().putGridB(gridbExpanded).catch(()=>{}); } catch {}
       }
     }
 
@@ -318,6 +319,87 @@ function computeLocalStats(username = null) {
 app.use(cors());
 app.use(express.json({ limit: '64kb' }));
 
+// -------------------- WORLD MAP (PERSISTENT CLAIMS) --------------------
+const WORLDMAP_FILE = path.join(__dirname, 'worldmap.json');
+function readWorldMap() {
+  try {
+    const raw = fs.readFileSync(WORLDMAP_FILE, 'utf8');
+    const json = JSON.parse(raw);
+    if (json && typeof json === 'object' && json.cells && typeof json.cells === 'object') return json;
+  } catch {}
+  return { cells: {}, updatedAt: Date.now() };
+}
+function writeWorldMap(data) {
+  try {
+    data.updatedAt = Date.now();
+    if (typeof atomicWriteJson === 'function') {
+      atomicWriteJson(WORLDMAP_FILE, data);
+    } else {
+      fs.writeFileSync(WORLDMAP_FILE, JSON.stringify(data, null, 2));
+    }
+  } catch {}
+}
+function getUserColor(username) {
+  try {
+    const data = readDB();
+    const user = data.users.find(u => u.username === username);
+    return user?.color || '#3388ff';
+  } catch { return '#3388ff'; }
+}
+
+// GET /worldmap → { cells: [{ id, owner, color }] }
+app.get('/worldmap', (req, res) => {
+  try {
+    const store = readWorldMap();
+    const out = Object.entries(store.cells).map(([id, val]) => ({ id, owner: val.owner, color: val.color }));
+    return res.json({ ok: true, cells: out, updatedAt: store.updatedAt || Date.now() });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: 'worldmap_read_failed' });
+  }
+});
+
+// POST /worldmap/claim { id, username? } → claim if free
+app.post('/worldmap/claim', (req, res) => {
+  try {
+    const id = String(req.body?.id || '').trim();
+    let username = String(req.body?.username || req.query?.username || '').trim();
+    if (!id || !/^r-?\d+c-?\d+$/i.test(id)) return res.status(400).json({ ok:false, error:'invalid_id' });
+    if (!username) return res.status(400).json({ ok:false, error:'username_required' });
+
+    const store = readWorldMap();
+    const cell = store.cells[id];
+    if (cell && cell.owner && cell.owner !== username) {
+      return res.status(409).json({ ok:false, error:'already_claimed', owner: cell.owner });
+    }
+    const color = getUserColor(username);
+    store.cells[id] = { owner: username, color };
+    writeWorldMap(store);
+    return res.json({ ok:true, id, owner: username, color });
+  } catch (e) {
+    return res.status(500).json({ ok:false, error:'worldmap_claim_failed' });
+  }
+});
+
+// DELETE /worldmap/claim/:id?username=NAME → unclaim if owned by user
+app.delete('/worldmap/claim/:id', (req, res) => {
+  try {
+    const id = String(req.params.id || '').trim();
+    const username = String(req.query?.username || req.body?.username || '').trim();
+    if (!id) return res.status(400).json({ ok:false, error:'invalid_id' });
+    if (!username) return res.status(400).json({ ok:false, error:'username_required' });
+    const store = readWorldMap();
+    const cell = store.cells[id];
+    if (!cell || !cell.owner) return res.status(404).json({ ok:false, error:'not_found' });
+    if (cell.owner !== username) return res.status(403).json({ ok:false, error:'forbidden' });
+    delete store.cells[id];
+    writeWorldMap(store);
+    return res.json({ ok:true, id });
+  } catch (e) {
+    return res.status(500).json({ ok:false, error:'worldmap_unclaim_failed' });
+  }
+});
+// ------------------ END WORLD MAP (PERSISTENT CLAIMS) ------------------
+
 // Simple per-IP rate limiter for /volchain/tx
 // txRateLimiter/txBodySizeGuard moved to middleware/security
 
@@ -389,6 +471,22 @@ function transferLatestCells(fromUser, toUser, n) {
     // keep mined_seq unchanged (ownership move)
   }
   atomicWriteJson(DB_FILE, data);
+  // Mirror ownership move to PG
+  try {
+    const store = require('./lib/store').buildStore();
+    for (const cell of cells) {
+      const b = data.grid[cell.index];
+      store.upsertDigGridRow({
+        index: b.index,
+        dug_by: b.dugBy || null,
+        owner: b.owner || null,
+        status: b.status || null,
+        mined_seq: b.mined_seq || null,
+        color: b.color || null,
+        visual: b.visual || null,
+      }).catch(()=>{});
+    }
+  } catch {}
 }
 function burnLatestCells(username, n) {
   const data = readDB();
@@ -403,6 +501,14 @@ function burnLatestCells(username, n) {
     data.grid[i].visual = null;
   }
   atomicWriteJson(DB_FILE, data);
+  // Mirror burn to PG
+  try {
+    const store = require('./lib/store').buildStore();
+    for (const cell of cells) {
+      const i = cell.index;
+      store.upsertDigGridRow({ index: i, dug_by: null, owner: null, status: 'idle', mined_seq: null, color: null, visual: null }).catch(()=>{});
+    }
+  } catch {}
 }
 
 // moved to routes/grid.js
@@ -485,6 +591,7 @@ app.patch('/grid/:index', async (req, res) => {
         const backup = JSON.stringify(data);
         const stats = readStats();
         let finalized = 0;
+        const changedDigIndices = new Set();
         for (let i = 0; i < data.grid.length; i++) {
           const g = data.grid[i];
           if (!g) continue;
@@ -494,6 +601,7 @@ app.patch('/grid/:index', async (req, res) => {
             g.mined_seq = Number(stats.next_mined_seq || 1);
             stats.next_mined_seq = g.mined_seq + 1;
             finalized++;
+            changedDigIndices.add(i);
           }
         }
         // Ensure clicked block is finalized as dug and owned by user
@@ -511,6 +619,7 @@ app.patch('/grid/:index', async (req, res) => {
           // Apply color/visual if provided
           if (typeof color !== 'undefined') clicked.color = color || null;
           clicked.visual = visual || null;
+          changedDigIndices.add(index);
         }
         // Recompute accounts (balance/used/available) from Digzone + GridB for all users
         try {
@@ -550,6 +659,54 @@ app.patch('/grid/:index', async (req, res) => {
         stats.total_supply = Number(stats.total_supply || 0) + finalized;
         writeDB(data);
         writeStats(stats);
+
+        // Auto-expand by 100 blocks if all current blocks are dug
+        try {
+          const allDug = Array.isArray(data.grid) && data.grid.length > 0 && data.grid.every(b => b && b.status === 'dug');
+          if (allDug) {
+            const startLen = data.grid.length;
+            const add = 100;
+            for (let i = 0; i < add; i++) {
+              data.grid.push({ index: startLen + i, dugBy: null, color: null, visual: null });
+            }
+            writeDB(data);
+            // Ensure GridB matches new length
+            try {
+              const gb = readGridB(startLen);
+              const expanded = gb.concat(Array.from({ length: add }, (_, k) => ({ index: startLen + k, owner: null, color: null, visual: null, userBlockIndex: null, defense: 0 })));
+              writeGridB(expanded);
+              // Dual-write expanded grids to PG (best-effort)
+              try {
+                const store = require('./lib/store').buildStore();
+                store.putDigGrid(data.grid).catch(()=>{});
+                store.putGridB(expanded).catch(()=>{});
+              } catch {}
+            } catch {}
+          }
+        } catch {}
+        // Dual-write Digzone grid to PostgreSQL (synchronous barrier; rollback JSON on failure)
+        try {
+          const store = require('./lib/store').buildStore();
+          for (const i of Array.from(changedDigIndices)) {
+            const b = data.grid[i];
+            if (!b) continue;
+            try {
+              await store.upsertDigRow({
+                index: i,
+                dugBy: b.dugBy || null,
+                owner: b.owner || null,
+                status: b.status || null,
+                mined_seq: b.mined_seq || null,
+                color: b.color || null,
+                visual: b.visual || null,
+              });
+            } catch (e) {
+              // PG failed; revert JSON and abort
+              try { writeDB(JSON.parse(backup)); } catch {}
+              throw e;
+            }
+          }
+        } catch (e) { throw e; }
         try { assertInvariants(); } catch (e) { logger.warn(String(e?.message||e)); }
         appendAudit('dig', username, { index }, { finalized });
         return { rollback: () => { try { writeDB(JSON.parse(backup)); } catch {} } };
@@ -598,10 +755,12 @@ app.patch('/grid/:index', async (req, res) => {
       op_id: opId
     });
     if (!result || result.ok !== true) {
+      console.error(`[DIG BARRIER FAILED] username=${username}, index=${index}, result=${JSON.stringify(result)}`);
       return res.status(409).json({ success: false, error: 'dig_chain_barrier_failed', details: result });
     }
   } catch (e) {
     const msg = String(e?.message || e);
+    console.error(`[DIG ERROR] username=${username}, index=${index}, error=${msg}, stack=${e?.stack}`);
     return res.status(400).json({ success: false, error: msg });
   }
 
@@ -838,11 +997,13 @@ app.post('/admin/normalize-grid-length', (req, res) => {
       // Ensure GridB matches the same length
       let gridb = readGridB(targetLength);
       writeGridB(gridb);
+      try { require('./lib/store').buildStore().putGridB(gridb).catch(()=>{}); } catch {}
       return res.json({ success: true, added: toAdd, newLength: targetLength, gridbLength: gridb.length });
     }
     // Even if no addition, ensure GridB matches current target length
     let gridb = readGridB(targetLength);
     writeGridB(gridb);
+    try { require('./lib/store').buildStore().putGridB(gridb).catch(()=>{}); } catch {}
     return res.json({ success: true, added: 0, newLength: currentLength, gridbLength: gridb.length });
   } catch (e) {
     logger.error('normalize-grid-length error:', e);
@@ -1245,6 +1406,9 @@ app.get('/volchain/verify', (req, res) => {
 // Admin: Backfill snapshot->blocks deltas as txs and enqueue to mempool
 app.post('/admin/volchain-backfill-from-snapshot', (req, res) => {
   try {
+    if (String(process.env.VOLCHAIN_ALLOW_BACKFILL) !== '1') {
+      return res.status(403).json({ ok:false, error:'backfill_disabled' });
+    }
     if (String(VOLCHAIN_DEV_FAUCET) !== '1' && !VOLCHAIN_ADMIN_SECRET) {
       return res.status(403).json({ ok:false, error:'forbidden' });
     }
@@ -1263,6 +1427,9 @@ app.post('/admin/volchain-backfill-from-snapshot', (req, res) => {
 // Same backfill under /volchain/* (already proxied) for convenience
 app.post('/volchain/backfill-from-snapshot', (req, res) => {
   try {
+    if (String(process.env.VOLCHAIN_ALLOW_BACKFILL) !== '1') {
+      return res.status(403).json({ ok:false, error:'backfill_disabled' });
+    }
     const hdr = req.headers['x-admin-secret'] || req.headers['X-Admin-Secret'] || req.headers['x-admin-secret'.toLowerCase()];
     if (VOLCHAIN_DEV_FAUCET !== '1' && (!VOLCHAIN_ADMIN_SECRET || hdr !== VOLCHAIN_ADMIN_SECRET)) {
       return res.status(403).json({ ok:false, error:'forbidden' });
@@ -1278,6 +1445,9 @@ app.post('/volchain/backfill-from-snapshot', (req, res) => {
 // Allow GET for convenience/tools that cannot POST easily
 app.get('/volchain/backfill-from-snapshot', (req, res) => {
   try {
+    if (String(process.env.VOLCHAIN_ALLOW_BACKFILL) !== '1') {
+      return res.status(403).json({ ok:false, error:'backfill_disabled' });
+    }
     const hdr = req.headers['x-admin-secret'] || req.headers['X-Admin-Secret'] || req.headers['x-admin-secret'.toLowerCase()];
     if (VOLCHAIN_DEV_FAUCET !== '1' && (!VOLCHAIN_ADMIN_SECRET || hdr !== VOLCHAIN_ADMIN_SECRET)) {
       return res.status(403).json({ ok:false, error:'forbidden' });
@@ -1543,50 +1713,45 @@ app.get('/stats/blockchain', async (req, res) => {
 });
 */
 
-// Removed token transfer/reset endpoints (Solana/THET removed)
+// Removed token transfer/reset endpoints (Solana/Volore removed)
 
 app.post('/api/update-username', async (req, res) => {
   const { currentUsername, newUsername } = req.body;
   if (!currentUsername || !newUsername) {
     return res.status(400).json({ error: 'Current and new usernames are required' });
   }
-  if (String(newUsername).trim().length < 3) {
-    return res.status(400).json({ error: 'New username must be at least 3 characters long' });
-  }
   try {
     const data = readDB();
-    const userIndex = data.users.findIndex(user => user.username === currentUsername);
+    const userIndex = data.users.findIndex(u => u.username === currentUsername);
     if (userIndex === -1) {
       return res.status(404).json({ error: 'User not found' });
     }
-    const normalizedNew = String(newUsername || '').trim();
-    const usernameExists = data.users.some(user => 
-      user.username.toLowerCase() === normalizedNew.toLowerCase() && user.username !== currentUsername
-    );
-    if (usernameExists) {
-      return res.status(400).json({ error: 'This username is already taken (case-insensitive)' });
-    }
+    const normalizedNew = String(newUsername);
+    // Update usernames in DB
     data.users[userIndex].username = normalizedNew;
-    data.grid = data.grid.map(block => {
-      if (block.dugBy === currentUsername) {
-        return { ...block, dugBy: normalizedNew };
-      }
-      return block;
-    });
-
-    // GridB'deki owner alanlarını da güncelle (Warzone)
-    const totalBlocks = data.grid.length;
-    const gridBData = readGridB(totalBlocks);
+    // Update GridB ownerships
+    const gridBData = readGridB(data.grid.length);
     const updatedGridB = gridBData.map(block => 
       block.owner === currentUsername ? { ...block, owner: normalizedNew } : block
     );
     writeGridB(updatedGridB);
-
+    
     writeDB(data);
+
+    // PG dual-write
+    try {
+      const store = require('./lib/store').buildStore();
+      await store.upsertUser({ username: normalizedNew, color: data.users[userIndex]?.color || null, pow_pubkey: data.users[userIndex]?.powPubkey || null, email: data.users[userIndex]?.email || null });
+      for (const b of updatedGridB) {
+        if (b && b.owner === normalizedNew) {
+          await store.upsertGridBRow(b);
+        }
+      }
+    } catch {}
+
     res.json({ success: true, newUsername });
-  } catch (error) {
-    logger.error('Username update error:', error);
-    res.status(500).json({ error: 'Username update failed' });
+  } catch {
+    res.status(500).json({ error: 'Update failed' });
   }
 });
 
@@ -1724,31 +1889,46 @@ function writePendingVolchain(list) {
 
 function appendVolchainEvent(evt) {
   try {
+    // Only allow core Volchain events: mint, burn, transfer
+    try {
+      const t = String(evt && evt.type || '').toLowerCase();
+      const allowed = t === 'mint' || t === 'burn' || t === 'transfer';
+      if (!allowed) return; // ignore non-core events (stake/unstake/attack)
+    } catch {}
     // Prefer appending to chain first, then log; if chain fails, enqueue pending
     let appended = false;
     try {
-      // Ensure op_id present for idempotency
       const withOp = { ...evt };
-      if (!withOp.op_id && !(withOp.memo && withOp.memo.op_id)) {
+      if (!withOp.op_id) {
         withOp.op_id = genOpId();
       }
       volchain.appendEvent(withOp);
       appended = true;
     } catch (e) {
-      logger.error('volchain chain append error (queued for retry):', e.message);
-      const pending = readPendingVolchain();
-      pending.unshift({ ts: Date.now(), ...evt });
-      writePendingVolchain(pending.slice(0, 5000)); // cap pending size
+      try { const list = readPendingVolchain(); list.push(evt); writePendingVolchain(list); } catch {}
     }
-
-    // Always write activity log for UI
-    const entries = readVolchainLog();
-    entries.unshift({ ts: Date.now(), ...evt, _chainAppended: appended });
-    const trimmed = entries.slice(0, 1000);
-    writeVolchainLog(trimmed);
-  } catch (e) {
-    logger.error('appendVolchainEvent error:', e.message);
-  }
+    if (appended) {
+      try { const list = readPendingVolchain(); if (list.length > 0) { const last = list[list.length - 1]; if (JSON.stringify(last) === JSON.stringify(evt)) list.pop(); writePendingVolchain(list); } } catch {}
+    }
+    // Mirror to PG: events + accounts (best-effort)
+    try {
+      const store = require('./lib/store').buildStore();
+      store.appendVolEvent(evt).catch(()=>{});
+      // Update accounts snapshot-like for stake/unstake/burn/mint/transfer
+      const data = readDB();
+      const snap = volchain.getSnapshot();
+      const users = data.users || [];
+      const map = {};
+      users.forEach(u => { if (u && u.powPubkey) map[u.username] = String(u.powPubkey).toLowerCase(); });
+      const balances = snap?.balances || {};
+      const staked = snap?.staked || {};
+      for (const [pub, bal] of Object.entries(balances)) {
+        const s = Number(staked[pub] || 0);
+        const b = Number(bal || 0);
+        store.upsertAccount({ pubkey: pub, balance: b, staked: s, available: Math.max(0, b - s) }).catch(()=>{});
+      }
+    } catch {}
+  } catch {}
 }
 
 async function retryPendingVolchainOnce() {
@@ -1990,6 +2170,19 @@ app.post('/volchain/transfer', async (req, res) => {
           upsertAccount(receiver.username, (a)=>{ const used = Math.min(Number(a.used||0), minedTo); return { username: receiver.username, balance: minedTo, used, available: minedTo - used }; });
           try { assertInvariants(); } catch (e) { logger.warn(String(e?.message||e)); }
           appendAudit('transfer', username, { to: receiver.username, amount: amt }, {});
+          // Mirror to PG accounts
+          try {
+            const store = require('./lib/store').buildStore();
+            const v = require('./volchain_chain.js');
+            const snap = v.getSnapshot();
+            const balFrom = Number(snap?.balances?.[sender.powPubkey.toLowerCase()] || 0);
+            const stFrom = Number(snap?.staked?.[sender.powPubkey.toLowerCase()] || 0);
+            const balTo = Number(snap?.balances?.[receiver.powPubkey.toLowerCase()] || 0);
+            const stTo = Number(snap?.staked?.[receiver.powPubkey.toLowerCase()] || 0);
+            store.upsertAccount({ pubkey: sender.powPubkey.toLowerCase(), balance: balFrom, staked: stFrom, available: Math.max(0, balFrom - stFrom) }).catch(()=>{});
+            store.upsertAccount({ pubkey: receiver.powPubkey.toLowerCase(), balance: balTo, staked: stTo, available: Math.max(0, balTo - stTo) }).catch(()=>{});
+            store.appendVolEvent({ ts: Date.now(), type: 'transfer', username, pubkey: sender.powPubkey, amount: amt, reason: 'server_transfer', op_id: opId, payload: { to: receiver.powPubkey } }).catch(()=>{});
+          } catch {}
           return { rollback: () => writeDB(JSON.parse(dbBackup)) };
         });
       },
@@ -2047,7 +2240,8 @@ function startInvariantMonitoring() {
 
   logger.info('🔍 Invariant monitoring sistemi başlatılıyor...');
 
-  invariantCheckInterval = setInterval(async () => {
+  // Disabled per ops decision to reduce load
+  /* invariantCheckInterval = setInterval(async () => {
     try {
       const v = require('./volchain_chain.js');
       const snapshot = v.getSnapshot();
@@ -2096,7 +2290,7 @@ function startInvariantMonitoring() {
     } catch (error) {
       logger.error('❌ Invariant monitoring error:', error.message);
     }
-  }, 30000); // Her 30 saniyede bir kontrol
+  }, 30000); // Her 30 saniyede bir kontrol */
 }
 
 function stopInvariantMonitoring() {
@@ -2412,14 +2606,14 @@ app.patch('/gridb/:index', async (req, res) => {
           const backup = JSON.stringify(gridb);
           gridb[blockIndex] = { index: blockIndex, owner: username, defense: 1 };
           writeGridB(gridb);
+          try { require('./lib/store').buildStore().upsertGridBRow(gridb[blockIndex]).catch(()=>{}); } catch {}
           const newMined = computeUserMinedFromDigzone(username);
           const newUsed = computeUserUsedFromGridB(username);
           upsertAccount(username, () => ({ username, balance: newMined, used: Math.min(newUsed, newMined), available: Math.max(0, newMined - Math.min(newUsed, newMined)) }));
           try { assertInvariants(); } catch (e) { logger.warn(String(e?.message||e)); }
           appendAudit('gridb_claim_fallback', username, { index: blockIndex }, { reason: claimResult.error });
           try {
-            const user = db.users.find(u => u.username === username);
-            appendVolchainEvent({ type: 'stake', username, pubkey: user?.powPubkey, amount: 1, reason: 'claim_ownerless', gridIndex: blockIndex, op_id: opId, memo:{ op_id: opId, reason:'claim_ownerless', gridIndex: blockIndex } });
+            // do not append non-core stake event to Volchain
           } catch (e) { logger.warn('claim fallback enqueue failed', e?.message || e); }
         } catch (e) {
           logger.error('claim fallback commit failed:', e?.message || e);
@@ -2457,6 +2651,7 @@ app.patch('/gridb/:index', async (req, res) => {
           gridb[blockIndex].defense = after;
         }
         writeGridB(gridb);
+        try { require('./lib/store').buildStore().upsertGridBRow(gridb[blockIndex]).catch(()=>{}); } catch {}
 
         // Apply attack economics: attacker burns 1 available; defender loses 1 used; 2 blocks become ownerless in Digzone
         try {
@@ -2477,8 +2672,7 @@ app.patch('/gridb/:index', async (req, res) => {
         try { assertInvariants(); } catch (e) { logger.warn(String(e?.message||e)); }
         appendAudit('gridb_attack_fallback', username, { index: blockIndex, defender: defenderName }, { reason: attackResult.error });
         try {
-          appendVolchainEvent({ type: 'attack', attackerPubkey: attackerUser.powPubkey, defenderPubkey: defenderUser.powPubkey, amount: 1, reason:'warzone_attack', gridIndex: blockIndex, op_id: opId, memo:{ reason: 'warzone_attack', gridIndex: blockIndex, op_id: opId } });
-          // Also reflect burns explicitly for UI
+          // Reflect burns only (no attack event)
           appendVolchainEvent({ type: 'burn', username, pubkey: attackerUser.powPubkey, amount: 1, reason:'attack_burn_attacker', gridIndex: blockIndex, op_id: opId+'.burnA', memo:{ reason:'attack_burn_attacker', gridIndex: blockIndex, op_id: opId+'.burnA' } });
           appendVolchainEvent({ type: 'burn', username: defenderName, pubkey: defenderUser.powPubkey, amount: 1, reason:'attack_burn_defender', gridIndex: blockIndex, op_id: opId+'.burnD', memo:{ reason:'attack_burn_defender', gridIndex: blockIndex, op_id: opId+'.burnD' } });
         } catch (e) { logger.warn('attack fallback enqueue failed', e?.message || e); }
@@ -2504,6 +2698,107 @@ app.get('/test/system', (req, res) => {
     timestamp: new Date().toISOString(),
     guard_enabled: true
   });
+});
+
+// Store health (PG connectivity)
+app.get('/store/health', async (req, res) => {
+  try {
+    const { query } = require('./lib/pg');
+    await query('SELECT 1');
+    return res.json({ ok: true, pg: 'up' });
+  } catch (e) {
+    return res.json({ ok: true, pg: 'down' });
+  }
+});
+
+// Background reconcile: push JSON → PG to eliminate drift (idempotent upserts)
+async function reconcileJsonToPgOnce() {
+  try {
+    const data = readDB();
+    const totalBlocks = (data?.grid || []).length;
+    // GridB
+    try {
+      const gb = readGridB(totalBlocks);
+      const store = require('./lib/store').buildStore();
+      for (const it of gb) {
+        if (it && typeof it === 'object') {
+          const row = {
+            index: Number(it.index), owner: it.owner || null,
+            defense: Number(it.defense || 0), color: it.color || null,
+            visual: it.visual || null, userBlockIndex: it.userBlockIndex || null
+          };
+          await store.upsertGridBRow(row).catch(()=>{});
+        }
+      }
+    } catch {}
+    // Digzone
+    try {
+      const store = require('./lib/store').buildStore();
+      for (let i = 0; i < (data.grid || []).length; i++) {
+        const b = data.grid[i];
+        if (!b) continue;
+        const row = {
+          index: i,
+          dug_by: b.dugBy || null,
+          color: b.color || null,
+          visual: b.visual || null,
+          mined_seq: b.mined_seq || null,
+          status: b.status || null,
+          owner: b.owner || null
+        };
+        await store.upsertDigGridRow(row).catch(()=>{});
+      }
+    } catch {}
+
+    // PG -> File fill for missing values (do not overwrite non-null file values)
+    try {
+      const { query } = require('./lib/pg');
+      const { FileStore } = require('./lib/store');
+      const fileStore = new FileStore();
+      // Dig from PG
+      const digRes = await query('SELECT index, dug_by, color, visual FROM dig_blocks ORDER BY index');
+      for (const r of digRes.rows) {
+        const idx = Number(r.index);
+        const f = data.grid[idx];
+        const need = !f || (f && (f.dugBy == null && r.dug_by != null || f.color == null && r.color != null || f.visual == null && r.visual != null));
+        if (need) {
+          await fileStore.upsertDigRow({ index: idx, dugBy: r.dug_by || null, color: r.color || null, visual: r.visual || null }).catch(()=>{});
+        }
+      }
+      // GridB from PG
+      const gbRes = await query('SELECT index, owner, defense, color, visual, user_block_index FROM gridb_blocks ORDER BY index');
+      for (const r of gbRes.rows) {
+        const idx = Number(r.index);
+        const gbArr = readGridB(totalBlocks);
+        const g = gbArr[idx];
+        const need = !g || (g && ((g.owner == null && r.owner != null) || (Number(g.defense||0) === 0 && Number(r.defense||0) > 0) || (g.color == null && r.color != null) || (g.visual == null && r.visual != null) || (g.userBlockIndex == null && r.user_block_index != null)));
+        if (need) {
+          await fileStore.upsertGridBRow({ index: idx, owner: r.owner || null, defense: Number(r.defense||0), color: r.color || null, visual: r.visual || null, userBlockIndex: r.user_block_index || null }).catch(()=>{});
+        }
+      }
+    } catch {}
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String(e?.message || e) };
+  }
+}
+
+// Periodic reconcile disabled (manual only via admin endpoint)
+// setTimeout(() => { reconcileJsonToPgOnce().catch(()=>{}); }, 5000);
+// setInterval(() => { reconcileJsonToPgOnce().catch(()=>{}); }, 120000);
+
+// Manual trigger
+app.post('/admin/reconcile-json-to-pg', async (req, res) => {
+  try {
+    const hdr = req.headers['x-admin-secret'] || req.headers['X-Admin-Secret'] || req.headers['x-admin-secret'.toLowerCase()];
+    if (!VOLCHAIN_ADMIN_SECRET || hdr !== VOLCHAIN_ADMIN_SECRET) {
+      return res.status(403).json({ ok:false, error:'admin_secret_required' });
+    }
+    const r = await reconcileJsonToPgOnce();
+    return res.json(r);
+  } catch (e) {
+    return res.status(500).json({ ok:false, error:'failed' });
+  }
 });
 
 // POST /gridb/:index/stake: User increases defense by 1 on own block (support/stake)
@@ -2566,6 +2861,7 @@ app.post('/gridb/:index/stake', async (req, res) => {
         try { logger.info(`[GRİDB STAKE] writing GridB index=${blockIndex} current=${currentDefense} -> new=${newDefense}`); } catch {}
         try { fs.appendFileSync('/tmp/stake_debug.log', `[writeGridB] index=${blockIndex} from=${currentDefense} to=${newDefense}\n`); } catch {}
         writeGridB(gridb);
+        try { require('./lib/store').buildStore().upsertGridBRow(gridb[blockIndex]).catch(()=>{}); } catch {}
         try { logger.info(`[GRİDB STAKE] writeGridB OK`); } catch {}
         try { fs.appendFileSync('/tmp/stake_debug.log', `[writeGridB OK]\n`); } catch {}
         const newMined = computeUserMinedFromDigzone(username);
@@ -2582,12 +2878,7 @@ app.post('/gridb/:index/stake', async (req, res) => {
 
         try { assertInvariants(); } catch (e) { logger.warn(String(e?.message||e)); }
         appendAudit('stake_fallback', username, { index: blockIndex }, { reason: stakeResult.error });
-        // enqueue volchain event (appendVolchainEvent handles pending queue on failure)
-        try {
-          const user = db.users.find(u => u.username === username);
-          appendVolchainEvent({ type: 'stake', username, pubkey: user?.powPubkey, amount: 1, reason: 'support', gridIndex: blockIndex, op_id: opId, memo:{ op_id: opId, reason:'support', gridIndex: blockIndex } });
-          try { logger.info(`[GRİDB STAKE] event enqueued user=${username}`); } catch {}
-        } catch (e) { logger.warn('stake fallback enqueue failed', e?.message || e); try { fs.appendFileSync('/tmp/stake_debug.log', `[enqueue fail] ${e?.message||e}\n`); } catch {} }
+        // no volchain stake event; UI shows result via gridb state
       } catch (e) {
         logger.error('stake fallback commit failed:', e?.stack || e?.message || e);
         try { fs.appendFileSync('/tmp/stake_debug.log', `[fallback fail] ${e?.stack||e?.message||e}\n`); } catch {}
@@ -2655,14 +2946,14 @@ app.post('/gridb/:index/unstake', async (req, res) => {
           gridb[blockIndex].defense = newDefense;
         }
         writeGridB(gridb);
+        try { require('./lib/store').buildStore().upsertGridBRow(gridb[blockIndex]).catch(()=>{}); } catch {}
         const newMined = computeUserMinedFromDigzone(username);
         const newUsed = computeUserUsedFromGridB(username);
         upsertAccount(username, () => ({ username, balance: newMined, used: Math.min(newUsed, newMined), available: Math.max(0, newMined - Math.min(newUsed, newMined)) }));
         try { assertInvariants(); } catch (e) { logger.warn(String(e?.message||e)); }
         appendAudit('unstake_fallback', username, { index: blockIndex }, { reason: unstakeResult.error });
         try {
-          const user = db.users.find(u => u.username === username);
-          appendVolchainEvent({ type: 'unstake', username, pubkey: user?.powPubkey, amount: 1, reason: 'manual_unstake', gridIndex: blockIndex, op_id: opId, memo:{ op_id: opId, reason:'manual_unstake', gridIndex: blockIndex } });
+          // no volchain unstake event
         } catch (e) { logger.warn('unstake fallback enqueue failed', e?.message || e); }
       } catch (e) {
         logger.error('unstake fallback commit failed:', e?.message || e);
@@ -2738,14 +3029,14 @@ app.delete('/gridb/:index', async (req, res) => {
         const backup = JSON.stringify(gridb);
         gridb[blockIndex] = { index: blockIndex, owner: null, color: null, visual: null, userBlockIndex: null, defense: 0 };
         writeGridB(gridb);
+        try { require('./lib/store').buildStore().upsertGridBRow(gridb[blockIndex]).catch(()=>{}); } catch {}
         const newMined = computeUserMinedFromDigzone(username);
         const newUsed = computeUserUsedFromGridB(username);
         upsertAccount(username, () => ({ username, balance: newMined, used: Math.min(newUsed, newMined), available: Math.max(0, newMined - Math.min(newUsed, newMined)) }));
         try { assertInvariants(); } catch (e) { logger.warn(String(e?.message||e)); }
         appendAudit('gridb_remove_fallback', username, { index: blockIndex, oldDefense }, { reason: removeResult.error });
         try {
-          const user = db.users.find(u => u.username === username);
-          appendVolchainEvent({ type: 'unstake', username, pubkey: user?.powPubkey, amount: Math.max(1, oldDefense || 1), reason: 'remove_block', gridIndex: blockIndex, op_id: opId, memo:{ op_id: opId, reason:'remove_block', gridIndex: blockIndex } });
+          // no volchain unstake event on remove
         } catch (e) { logger.warn('remove fallback enqueue failed', e?.message || e); }
       } catch (e) {
         logger.error('remove fallback commit failed:', e?.message || e);
@@ -2768,8 +3059,72 @@ try { app.use(require('./routes/grid')); } catch (e) { logger.error('Failed to m
 try { app.use(require('./routes/gridb')); } catch (e) { logger.error('Failed to mount gridb routes:', e?.message || e); }
 try { app.use(require('./routes/volchain')); } catch (e) { logger.error('Failed to mount volchain routes:', e?.message || e); }
 
-// Periodic stake alignment to keep Volchain in sync with GridB (UI truth)
-try { require('./tasks/align').initPeriodicStakeAlign(); logger.info('Periodic stake alignment initialized'); } catch (e) { logger.error('Failed to init periodic stake align:', e?.message || e); }
+// Volore summary for a user: total/used/available (JSON truth)
+app.get('/api/volore/:username', (req, res) => {
+  try {
+    const username = String(req.params.username || '').trim();
+    if (!username) return res.status(400).json({ error: 'username_required' });
+    const data = readDB();
+    // Count mined blocks for the user. Prefer owner when present, but fall back to dugBy for older records.
+    const total = (data.grid || []).reduce((acc, b) => {
+      if (!b) return acc;
+      const isDug = b.status === 'dug';
+      const isUserBlock = (b.owner === username) || (b.dugBy === username);
+      return acc + ((isDug && isUserBlock) ? 1 : 0);
+    }, 0);
+    const gridb = readGridB((data.grid || []).length);
+    let used = 0;
+    for (const cell of gridb) {
+      if (cell && cell.owner === username) {
+        let d = Number(cell.defense);
+        if (!Number.isFinite(d)) d = 1;
+        if (d < 0) d = 0;
+        used += d;
+      }
+    }
+    const available = Math.max(0, total - used);
+    const castles = gridb.reduce((acc, c) => acc + ((c && c.owner === username && Number(c.defense || 0) >= 10) ? 1 : 0), 0);
+    return res.json({ username, total, used, available, castles });
+  } catch (e) {
+    logger.error('volore summary error:', e?.message || e);
+    return res.status(500).json({ error: 'internal_error' });
+  }
+});
+
+// Volore top holders by mined (owner/status='dug')
+app.get('/api/volore/top', (req, res) => {
+  try {
+    const limit = Math.max(1, Math.min(50, Number(req.query.limit || 10)));
+    const data = readDB();
+    const minedBy = new Map();
+    for (const b of (data.grid || [])) {
+      if (b && b.status === 'dug' && b.owner) {
+        minedBy.set(b.owner, (minedBy.get(b.owner) || 0) + 1);
+      }
+    }
+    const gridb = readGridB((data.grid || []).length);
+    const usedBy = new Map();
+    for (const c of gridb) {
+      if (c && c.owner) {
+        let d = Number(c.defense);
+        if (!Number.isFinite(d)) d = 1;
+        if (d < 0) d = 0;
+        usedBy.set(c.owner, (usedBy.get(c.owner) || 0) + d);
+      }
+    }
+    const rows = Array.from(minedBy.entries()).map(([u, total]) => {
+      const used = Math.min(usedBy.get(u) || 0, total);
+      return { username: u, total, used, available: Math.max(0, total - used) };
+    }).sort((a, b) => b.total - a.total).slice(0, limit);
+    return res.json(rows);
+  } catch (e) {
+    logger.error('volore top error:', e?.message || e);
+    return res.status(500).json([]);
+  }
+});
+
+// Periodic stake alignment to keep Volchain in sync with GridB (UI truth) - DISABLED
+// try { require('./tasks/align').initPeriodicStakeAlign(); logger.info('Periodic stake alignment initialized'); } catch (e) { logger.error('Failed to init periodic stake align:', e?.message || e); }
 
 // Start server
 app.listen(PORT, '0.0.0.0', () => {
@@ -2777,20 +3132,54 @@ app.listen(PORT, '0.0.0.0', () => {
   try {
     if (VOLCHAIN_MODE === 'mempool') {
       const v = require('./volchain_chain.js');
+      // Load mempool from disk on startup
+      try {
+        v.loadMempoolFromDisk();
+        logger.info(`VolChain mempool loaded: ${v.__mempoolSize()} transactions`);
+      } catch (e) {
+        logger.error('Failed to load VolChain mempool:', e?.message || e);
+      }
       v.startProducer({ intervalMs: 1000, batch: 200 });
       logger.info('Volchain producer started (mempool mode)');
-      // Aggressive in-process flush to keep mempool empty and state consistent
+      // Reduced flush frequency to reduce load
       setInterval(() => {
         try {
           let loops = 0;
-          while ((v.__mempoolSize && v.__mempoolSize()) > 0 && loops < 100) {
+          while ((v.__mempoolSize && v.__mempoolSize()) > 0 && loops < 10) {
             v.sealPending(10000);
             loops++;
           }
         } catch {}
-      }, 1000);
+      }, 30000);
+
+      // Disabled invariant auto-correction to reduce periodic load
+      // (intentionally removed)
     }
   } catch (e) {
     logger.error('Failed to start Volchain producer:', e.message);
+  }
+});
+
+// Add color update with PG dual-write
+app.post('/auth/update-color', (req, res) => {
+  try {
+    const sessionToken = req.headers['x-session-token'];
+    if (!sessionToken) return res.status(401).json({ error: 'Unauthorized' });
+    validateSession(sessionToken).then(async (username) => {
+      if (!username) return res.status(401).json({ error: 'Unauthorized' });
+      const { color } = req.body || {};
+      const data = readDB();
+      const user = data.users.find(u => u.username === username);
+      if (!user) return res.status(404).json({ error: 'User not found' });
+      user.color = color || user.color || null;
+      writeDB(data);
+      try {
+        const store = require('./lib/store').buildStore();
+        await store.upsertUser({ username, color: user.color || null, pow_pubkey: user.powPubkey || null, email: user.email || null });
+      } catch {}
+      return res.json({ success: true });
+    }).catch(() => res.status(500).json({ error: 'Update failed' }));
+  } catch {
+    return res.status(500).json({ error: 'Update failed' });
   }
 });

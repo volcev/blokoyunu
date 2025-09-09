@@ -3,6 +3,7 @@ import Grid from "./Grid";
 import Login from "./Login";
 import About from "./About";
 import GridB from "./GridB";
+import WorldMapWarzone from "./WorldMapWarzone";
 import BlockchainStats from "./BlockchainStats";
 import MenuDropdownPortal from "./components/MenuDropdownPortal";
 import VolchainActivity from './components/VolchainActivity';
@@ -55,6 +56,7 @@ const App: React.FC = () => {
 
   const [showMenu, setShowMenu] = useState<boolean>(false);
   const [showGridB, setShowGridB] = useState<boolean>(false);
+  const [showWorldMap, setShowWorldMap] = useState<boolean>(false);
   const [showBlockchainStats, setShowBlockchainStats] = useState<boolean>(false);
   const [showVolore, setShowVolore] = useState<boolean>(false);
   const [tokenBalance, setTokenBalance] = useState<number>(0);
@@ -250,6 +252,7 @@ const App: React.FC = () => {
 
       setShowMenu(false);
       setShowGridB(false);
+      setShowWorldMap(false);
     }
   };
 
@@ -470,6 +473,7 @@ const App: React.FC = () => {
         onSettings={() => { setShowSettings(true); setShowMenu(false); }}
         onVolore={() => { setShowVolore(true); setShowMenu(false); }}
         onVolchainActivity={() => { setShowVolchainActivity(true); setShowMenu(false); }}
+        onTest={() => { setShowWorldMap(true); setShowMenu(false); }}
         onContact={() => { setShowContactUs(true); setShowMenu(false); }}
         onLogout={() => { handleLogout(); setShowMenu(false); }}
       />
@@ -524,6 +528,38 @@ const App: React.FC = () => {
           {username && userColor ? (
             showAbout ? (
               <About setShowAbout={setShowAbout} />
+            ) : showWorldMap ? (
+              <div>
+                <div style={{ 
+                  display: 'flex', 
+                  justifyContent: 'space-between', 
+                  alignItems: 'center', 
+                  marginBottom: '16px',
+                  padding: '0 16px'
+                }}>
+                  <h2 style={{ margin: 0, color: '#333' }}>🗺️ World Map Test</h2>
+                  <button
+                    onClick={() => setShowWorldMap(false)}
+                    style={{
+                      padding: '8px 16px',
+                      backgroundColor: '#ff5722',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '6px',
+                      cursor: 'pointer',
+                      fontWeight: 'bold'
+                    }}
+                  >
+                    Back to Game
+                  </button>
+                </div>
+                <WorldMapWarzone
+                  username={username}
+                  userColor={userColor}
+                  tokenBalance={tokenBalance}
+                  setTokenBalance={setTokenBalance}
+                />
+              </div>
             ) : showGridB ? (
               <GridB
                 totalBlocks={blockData.length}

@@ -1,0 +1,181 @@
+{
+  "generatedAt": "2025-09-06T11:15:31.034Z",
+  "file": {
+    "dugCells": 6055
+  },
+  "volchain": {
+    "totalSupply": 6054
+  },
+  "users": {
+    "Selin": {
+      "username": "Selin",
+      "pubkey": "F9D953845CF255EF3C3E34DED606EE03A9DB8596BD8BA0A5EBF607B0BF9DEF5E",
+      "file": {
+        "mined": 258,
+        "owned": 258,
+        "defense": 111
+      },
+      "pg": {
+        "mined": 0,
+        "owned": 0,
+        "defense": 0
+      },
+      "volchain": {
+        "balance": 258
+      }
+    },
+    "Volkan2": {
+      "username": "Volkan2",
+      "pubkey": "503B0F6914027CBA0232E3A1D41F3E4A9E78BFFAA1763AB922F295CC7621EF5C",
+      "file": {
+        "mined": 1097,
+        "owned": 1097,
+        "defense": 961
+      },
+      "pg": {
+        "mined": 0,
+        "owned": 0,
+        "defense": 0
+      },
+      "volchain": {
+        "balance": 1096
+      }
+    },
+    "KG": {
+      "username": "KG",
+      "pubkey": "15122f7220e13d186e23a5d8f9efef6a2bdc1bee6730aa76516d5d97b157467c",
+      "file": {
+        "mined": 378,
+        "owned": 378,
+        "defense": 152
+      },
+      "pg": {
+        "mined": 0,
+        "owned": 0,
+        "defense": 0
+      },
+      "volchain": {
+        "balance": 378
+      }
+    },
+    "Vol": {
+      "username": "Vol",
+      "pubkey": "4C4237301AAC8159305A65D62FB993E81EBBC6E8F7DF26F66EC24EC8B214B5B2",
+      "file": {
+        "mined": 808,
+        "owned": 808,
+        "defense": 600
+      },
+      "pg": {
+        "mined": 0,
+        "owned": 0,
+        "defense": 0
+      },
+      "volchain": {
+        "balance": 808
+      }
+    },
+    "Dgngntrkn": {
+      "username": "Dgngntrkn",
+      "pubkey": "4F33A5B32B9DDFE0AE82A83831ED5974152F6D17FF673038926A28FD97C5EEB2",
+      "file": {
+        "mined": 2967,
+        "owned": 2967,
+        "defense": 2967
+      },
+      "pg": {
+        "mined": 0,
+        "owned": 0,
+        "defense": 0
+      },
+      "volchain": {
+        "balance": 2967
+      }
+    },
+    "Muge": {
+      "username": "Muge",
+      "pubkey": "aaf98c79d5bcd87d1d4b3d35382863d6622950d34c0141b7e6f7c591b852bb14",
+      "file": {
+        "mined": 183,
+        "owned": 183,
+        "defense": 0
+      },
+      "pg": {
+        "mined": 0,
+        "owned": 0,
+        "defense": 0
+      },
+      "volchain": {
+        "balance": 183
+      }
+    },
+    "Vacatay": {
+      "username": "Vacatay",
+      "pubkey": "8f264db82344b9b68c0351de645cd86b9981bcea8109c1fe898dc6c1a282e9a7",
+      "file": {
+        "mined": 212,
+        "owned": 212,
+        "defense": 91
+      },
+      "pg": {
+        "mined": 0,
+        "owned": 0,
+        "defense": 0
+      },
+      "volchain": {
+        "balance": 212
+      }
+    },
+    "Pepe": {
+      "username": "Pepe",
+      "pubkey": "2D82F596592A5E7AD5805594D741261A4CAEDC78608E845D11790621D0EF89CD",
+      "file": {
+        "mined": 73,
+        "owned": 73,
+        "defense": 0
+      },
+      "pg": {
+        "mined": 0,
+        "owned": 0,
+        "defense": 0
+      },
+      "volchain": {
+        "balance": 73
+      }
+    },
+    "CV": {
+      "username": "CV",
+      "pubkey": "41F3421843D365DD4305AD63E51F52454621CBBE9B89B5E69B38FB603FEAC811",
+      "file": {
+        "mined": 49,
+        "owned": 49,
+        "defense": 31
+      },
+      "pg": {
+        "mined": 0,
+        "owned": 0,
+        "defense": 0
+      },
+      "volchain": {
+        "balance": 49
+      }
+    },
+    "Tuba-1707": {
+      "username": "Tuba-1707",
+      "pubkey": "7e09c928e484c8e7148139e419c053265563f06f653d59d538258b739709c5ea",
+      "file": {
+        "mined": 30,
+        "owned": 30,
+        "defense": 16
+      },
+      "pg": {
+        "mined": 0,
+        "owned": 0,
+        "defense": 0
+      },
+      "volchain": {
+        "balance": 30
+      }
+    }
+  }
+}

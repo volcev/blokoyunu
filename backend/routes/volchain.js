@@ -5,6 +5,8 @@ const logger = require('../lib/logger');
 // Reuse server-scoped helpers via requires
 const volchain = require('../volchain_chain.js');
 const guard = require('../volchain_guard.js');
+const fs = require('fs');
+const path = require('path');
 
 const { txRateLimiter, txBodySizeGuard } = require('../middleware/security');
 
@@ -28,22 +30,87 @@ router.get('/volchain/events', (req, res) => {
       nextCursor = (typeof r?.nextCursor === 'number') ? r.nextCursor : null;
     } catch {}
 
-    // Merge fallback UI log to surface recent stake/unstake/remove immediately
+    // Stable deduplication key across sources
+    const computeKey = (e) => {
+      try {
+        if (e && e.memo && typeof e.memo.op_id === 'string' && e.memo.op_id) return `op:${e.memo.op_id}`;
+        const type = String(e?.type || '');
+        const ts = Number(e?.ts || 0);
+        let who = '';
+        if (typeof e?.pubkey === 'string' && /^[0-9a-fA-F]{64}$/.test(e.pubkey)) who = e.pubkey.toLowerCase();
+        else if (typeof e?.pubkey === 'string' && /^[A-Za-z0-9+/=]+$/.test(e.pubkey)) { try { who = volchain.b64ToHex(e.pubkey).toLowerCase(); } catch {} }
+        if (!who && typeof e?.username === 'string') who = `u:${e.username}`;
+        const gi = (e && typeof e.gridIndex === 'number') ? e.gridIndex : (e && e.memo && typeof e.memo.gridIndex === 'number') ? e.memo.gridIndex : '';
+        const amt = (typeof e?.amount === 'number') ? e.amount : '';
+        const reason = String((e?.reason || e?.memo?.reason) || '');
+        return `ts:${ts}|type:${type}|who:${who}|gi:${gi}|amt:${amt}|r:${reason}`;
+      } catch { return String(e?.ts || '') + ':' + String(e?.type || ''); }
+    };
+    const seen = new Set(events.map(ev => computeKey(ev)));
+
+    // Include pending dig mints from mempool as preview items (so UI shows them before sealing)
     try {
       const fs = require('fs');
       const path = require('path');
-      const logPath = path.join(__dirname, '..', 'volchain_log.json');
-      if (fs.existsSync(logPath)) {
-        const arr = JSON.parse(fs.readFileSync(logPath, 'utf8'));
-        if (Array.isArray(arr) && arr.length > 0) {
-          // Prepend fallback events that are not already present (by memo.op_id or ts+type)
-          const seen = new Set(events.map(e => (e?.memo?.op_id || `${e?.ts||''}:${e?.type||''}:${e?.gridIndex||''}`)));
-          for (const ev of arr.slice(0, limit)) {
-            const key = ev?.memo?.op_id || `${ev?.ts||''}:${ev?.type||''}:${ev?.gridIndex||''}`;
-            if (!seen.has(key)) {
-              events.unshift(ev);
-              seen.add(key);
+      const mempoolPath = path.join(__dirname, '..', 'volchain', 'mempool.jsonl');
+      if (fs.existsSync(mempoolPath)) {
+        const raw = fs.readFileSync(mempoolPath, 'utf8');
+        const lines = raw.split(/\n+/).filter(Boolean);
+        const pending = [];
+        for (let i = lines.length - 1; i >= 0 && pending.length < limit; i--) {
+          try {
+            const tx = JSON.parse(lines[i]);
+            // Include mint (dig) and burn (attack) events
+            if (tx && tx.type === 'mint' && String(tx?.memo?.reason || '').toLowerCase() === 'dig') {
+              pending.push({ ts: Number(tx.ts || Date.now()), type: 'mint', pubkey: (typeof tx.pubkey === 'string' ? tx.pubkey : ''), amount: tx.amount, reason: tx?.memo?.reason, memo: tx.memo || {} });
+            } else if (tx && tx.type === 'burn' && (String(tx?.memo?.reason || '').toLowerCase() === 'attack_burn_attacker' || String(tx?.memo?.reason || '').toLowerCase() === 'attack_burn_defender')) {
+              pending.push({ ts: Number(tx.ts || Date.now()), type: 'burn', pubkey: (typeof tx.pubkey === 'string' ? tx.pubkey : ''), amount: tx.amount, reason: tx?.memo?.reason, username: tx?.memo?.username, memo: tx.memo || {} });
             }
+          } catch {}
+        }
+        if (pending.length > 0) {
+          for (const ev of pending) {
+            const key = computeKey(ev);
+            if (!seen.has(key)) { events.unshift(ev); seen.add(key); }
+          }
+        }
+      }
+    } catch {}
+
+    // Merge fallback UI log only if mempool has items (avoid dupes after sealing)
+    try {
+      const mp = (volchain.__mempoolSize && typeof volchain.__mempoolSize === 'function') ? Number(volchain.__mempoolSize() || 0) : 0;
+      if (mp > 0) {
+        const fs = require('fs');
+        const path = require('path');
+        const logPath = path.join(__dirname, '..', 'volchain_log.json');
+        if (fs.existsSync(logPath)) {
+          const arr = JSON.parse(fs.readFileSync(logPath, 'utf8'));
+          if (Array.isArray(arr) && arr.length > 0) {
+            for (const ev of arr.slice(0, limit)) {
+              const key = computeKey(ev);
+              if (!seen.has(key)) { events.unshift(ev); seen.add(key); }
+            }
+            try {
+              const coreEvents = [];
+              for (let i = 0; i < arr.length && coreEvents.length < limit; i++) {
+                const ev = arr[i];
+                // Include mint (dig) events
+                if (ev && ev.type === 'mint' && String(ev.reason || ev?.memo?.reason || '').toLowerCase() === 'dig') {
+                  coreEvents.push(ev);
+                }
+                // Include burn (attack) events  
+                else if (ev && ev.type === 'burn' && (String(ev.reason || ev?.memo?.reason || '').toLowerCase() === 'attack_burn_attacker' || String(ev.reason || ev?.memo?.reason || '').toLowerCase() === 'attack_burn_defender')) {
+                  coreEvents.push(ev);
+                }
+              }
+              if (coreEvents.length > 0) {
+                for (const ev of coreEvents) {
+                  const key = computeKey(ev);
+                  if (!seen.has(key)) { events.unshift(ev); seen.add(key); }
+                }
+              }
+            } catch {}
           }
         }
       }
@@ -62,11 +129,7 @@ router.get('/volchain/events', (req, res) => {
             const pkHexUpper = String(u.powPubkey).toUpperCase();
             pubToUser[pkHexLower] = u.username;
             pubToUser[pkHexUpper] = u.username;
-            try {
-              const b64 = volchain.hexToB64(String(u.powPubkey));
-              const addr = volchain.addrFromPub(b64);
-              if (addr) addrToUser[addr] = u.username;
-            } catch {}
+            try { const b64 = volchain.hexToB64(String(u.powPubkey)); const addr = volchain.addrFromPub(b64); if (addr) addrToUser[addr] = u.username; } catch {}
           }
         }
       } catch {}
@@ -150,6 +213,16 @@ router.get('/volchain/events', (req, res) => {
           if (e && typeof e.to === 'string' && !e.toUser && addrToUser[e.to]) {
             e.toUser = addrToUser[e.to];
           }
+          // Additional: map hex pubkeys directly (used by attack events and some legacy entries)
+          const isHex64 = (s) => typeof s === 'string' && /^[0-9a-fA-F]{64}$/.test(s);
+          if (e && typeof e.from === 'string' && !e.fromUser && isHex64(e.from)) {
+            const keyLower = e.from.toLowerCase();
+            if (pubToUser[keyLower]) e.fromUser = pubToUser[keyLower];
+          }
+          if (e && typeof e.to === 'string' && !e.toUser && isHex64(e.to)) {
+            const keyLower = e.to.toLowerCase();
+            if (pubToUser[keyLower]) e.toUser = pubToUser[keyLower];
+          }
           // Fallback: toUser via memo.toPubkey
           if (!e?.toUser && e?.memo && typeof e.memo.toPubkey === 'string') {
             try {
@@ -185,7 +258,57 @@ router.get('/volchain/events', (req, res) => {
         return ib - ia;
       });
     } catch {}
-    // Trim to limit after sorting
+    // Final dedup across all sources (stable by current order)
+    try {
+      const seenAll = new Set();
+      const uniq = [];
+      for (const e of events) {
+        const k = computeKey(e);
+        if (seenAll.has(k)) continue;
+        seenAll.add(k);
+        uniq.push(e);
+      }
+      events = uniq;
+    } catch {}
+    // Collapse near-duplicates within the same second for identical (type, user/pubkey, reason, gridIndex)
+    // BUT preserve attack-related burns by including op_id in the key
+    try {
+      const isHex64 = (s) => typeof s === 'string' && /^[0-9a-fA-F]{64}$/.test(s);
+      const collapseKey = (e) => {
+        const t = String(e?.type || '');
+        const s = Math.floor(Number(e?.ts || 0) / 1000);
+        let who = '';
+        if (typeof e?.username === 'string') who = e.username;
+        else if (typeof e?.pubkey === 'string' && isHex64(e.pubkey)) who = e.pubkey.toLowerCase();
+        const r = String((e?.reason || e?.memo?.reason) || '');
+        const gi = (e && typeof e.gridIndex === 'number') ? e.gridIndex : (e && e.memo && typeof e.memo.gridIndex === 'number') ? e.memo.gridIndex : '';
+        
+        // Include op_id for attack-related burns to prevent deduplication
+        const opId = String((e?.op_id || e?.memo?.op_id) || '');
+        const isAttackBurn = (t === 'burn' && (r === 'attack_burn_attacker' || r === 'attack_burn_defender'));
+        
+        if (isAttackBurn && opId) {
+          return `${s}|${t}|${who}|${r}|${gi}|${opId}`;
+        }
+        
+        return `${s}|${t}|${who}|${r}|${gi}`;
+      };
+      const seenBuckets = new Set();
+      const compact = [];
+      for (const e of events) {
+        const bk = collapseKey(e);
+        if (seenBuckets.has(bk)) continue;
+        seenBuckets.add(bk);
+        compact.push(e);
+      }
+      events = compact;
+    } catch {}
+    // Show only core events in UI: mint, burn, transfer
+    try {
+      const core = new Set(['mint','burn','transfer']);
+      events = events.filter(e => core.has(String(e?.type || '').toLowerCase()));
+    } catch {}
+    // Trim to limit after sorting, dedup and filtering
     if (events.length > limit) events = events.slice(0, limit);
     return res.json({ events, nextCursor });
   } catch { res.status(500).json({ error: 'Failed to read volchain events' }); }
@@ -226,8 +349,13 @@ router.get('/volchain/blocks', (req, res) => {
 router.post('/volchain/tx', txRateLimiter, txBodySizeGuard, async (req, res) => {
   try {
     const b = req.body || {};
-    // Require valid signature unless type is system-only
-    if (b.type !== 'mint' && b.type !== 'stake' && b.type !== 'unstake') {
+    // Only accept core types here; system-only mints are handled server-side
+    const t = String(b.type || '').toLowerCase();
+    if (t !== 'transfer') {
+      return res.status(400).json({ ok:false, error:'unsupported_type' });
+    }
+    // Require valid signature for transfer
+    {
       const ok = await volchain.verifyTxSignature(b);
       if (!ok) return res.status(400).json({ ok:false, error:'bad_signature' });
     }
@@ -255,7 +383,55 @@ router.post('/volchain/canonicalize', (req, res) => {
 });
 
 router.get('/volchain/health', (req, res) => {
-  try { const snap = volchain.getSnapshot(); const mempoolSize = (()=>{ try{ const v=require('../volchain_chain.js'); return (v.__mempoolSize && v.__mempoolSize()) || 0; } catch { return 0; }})(); res.json({ lastId: snap?.lastId ?? 0, lastHash: snap?.lastHash ?? null, accounts: snap?.balances ? Object.keys(snap.balances).length : 0, height: snap?.height ?? 0, lastBlockId: snap?.lastBlockId ?? 0, lastBlockHash: snap?.lastBlockHash ?? null, lastBlockTime: snap?.lastBlockTime ?? null, mempoolSize }); } catch { res.status(500).json({ error:'Failed to read volchain health' }); }
+  try { const snap = volchain.getSnapshot(); const mempoolSize = (()=>{ try{ const v=require('../volchain_chain.js'); return (v.__mempoolSize && v.__mempoolSize()) || 0; } catch { return 0; }})(); const producerUptime = (()=>{ try{ const v=require('../volchain_chain.js'); return (v.__producerUptimeMs && v.__producerUptimeMs()) || 0; } catch { return 0; }})(); res.json({ lastId: snap?.lastId ?? 0, lastHash: snap?.lastHash ?? null, accounts: snap?.balances ? Object.keys(snap.balances).length : 0, height: snap?.height ?? 0, lastBlockId: snap?.lastBlockId ?? 0, lastBlockHash: snap?.lastBlockHash ?? null, lastBlockTime: snap?.lastBlockTime ?? null, mempoolSize, producerUptime }); } catch { res.status(500).json({ error:'Failed to read volchain health' }); }
+});
+
+// Manual seal endpoint (server process)
+router.post('/volchain/seal', (req, res) => {
+  try {
+    const remote = (req.ip || req.socket?.remoteAddress || '').replace('::ffff:', '');
+    const isLocal = (remote === '127.0.0.1' || remote === '::1');
+    if (!isLocal) {
+      const expectedFile = path.join(__dirname, '..', 'admin.secret');
+      const expected = fs.existsSync(expectedFile) ? String(fs.readFileSync(expectedFile, 'utf8')).trim() : '';
+      const provided = String(req.get('X-Admin-Secret') || '').trim();
+      if (!expected || provided !== expected) return res.status(403).json({ ok:false, error:'forbidden' });
+    }
+    const batch = Math.max(1, Math.min(10000, Number(req.query.batch || 1000)));
+    const block = volchain.sealPending(batch);
+    return res.json({ ok:true, sealed: !!block, block });
+  } catch (e) {
+    return res.status(500).json({ ok:false, error:'seal_failed' });
+  }
+});
+
+router.get('/volchain/seal', (req, res) => {
+  try {
+    const batch = Math.max(1, Math.min(10000, Number(req.query.batch || 1000)));
+    const block = volchain.sealPending(batch);
+    return res.json({ ok:true, sealed: !!block, block });
+  } catch (e) {
+    return res.status(500).json({ ok:false, error:'seal_failed' });
+  }
+});
+
+// Admin: Backfill snapshot deltas into mempool and seal (fix balance_mined mismatches)
+router.post('/admin/volchain-seed-backfill', (req, res) => {
+  try {
+    // Hard-disable unless explicitly allowed
+    if (String(process.env.VOLCHAIN_ALLOW_BACKFILL) !== '1') {
+      return res.status(403).json({ ok:false, error:'backfill_disabled' });
+    }
+    const secretFile = path.join(__dirname, '..', 'admin.secret');
+    const expected = fs.existsSync(secretFile) ? String(fs.readFileSync(secretFile, 'utf8')).trim() : '';
+    const provided = String(req.get('X-Admin-Secret') || '').trim();
+    if (!expected || provided !== expected) return res.status(401).json({ ok:false, error:'unauthorized' });
+    try { volchain.enqueueSeedBackfillTxs(); } catch {}
+    try { volchain.sealPending(10000); } catch {}
+    return res.json({ ok:true });
+  } catch (e) {
+    return res.status(500).json({ ok:false, error:'internal' });
+  }
 });
 
 module.exports = router;

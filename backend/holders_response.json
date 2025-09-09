@@ -1,1 +1,14 @@
-[{"pubkey":"4f33a5b32b9ddfe0ae82a83831ed5974152f6d17ff673038926a28fd97c5eeb2","balance":1583,"name":"Dgngntrkn","color":"#FF9800"},{"pubkey":"503b0f6914027cba0232e3a1d41f3e4a9e78bffaa1763ab922f295cc7621ef5c","balance":552,"name":"Volkan2","color":"#2196F3"},{"pubkey":"4c4237301aac8159305a65d62fb993e81ebbc6e8f7df26f66ec24ec8b214b5b2","balance":509,"name":"Vol","color":"#FFEB3B"},{"pubkey":"15122f7220e13d186e23a5d8f9efef6a2bdc1bee6730aa76516d5d97b157467c","balance":382,"name":"KG","color":"#4CAF50"},{"pubkey":"f9d953845cf255ef3c3e34ded606ee03a9db8596bd8ba0a5ebf607b0bf9def5e","balance":260,"name":"Selin","color":"#F8BBD0"},{"pubkey":"8f264db82344b9b68c0351de645cd86b9981bcea8109c1fe898dc6c1a282e9a7","balance":209,"name":"Vacatay","color":"#F8BBD0"},{"pubkey":"aaf98c79d5bcd87d1d4b3d35382863d6622950d34c0141b7e6f7c591b852bb14","balance":183,"name":"Muge","color":"#E1BEE7"},{"pubkey":"2d82f596592a5e7ad5805594d741261a4caedc78608e845d11790621d0ef89cd","balance":53,"name":"Pepe","color":"#F8BBD0"},{"pubkey":"41f3421843d365dd4305ad63e51f52454621cbbe9b89b5e69b38fb603feac811","balance":45,"name":"CV","color":"#FFF9C4"},{"pubkey":"7e09c928e484c8e7148139e419c053265563f06f653d59d538258b739709c5ea","balance":30,"name":"Tuba-1707","color":"#9C27B0"}]
+{
+  "deltas": [
+    {
+      "username": "Vol",
+      "hex": "4c4237301aac8159305a65d62fb993e81ebbc6e8f7df26f66ec24ec8b214b5b2",
+      "delta": -2
+    },
+    {
+      "username": "Volkan2",
+      "hex": "503b0f6914027cba0232e3a1d41f3e4a9e78bffaa1763ab922f295cc7621ef5c",
+      "delta": -2
+    }
+  ]
+}

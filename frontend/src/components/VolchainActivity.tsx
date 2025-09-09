@@ -3,7 +3,7 @@ import { withRetry } from './request';
 
 type Event = {
   ts: number;
-  type: 'mint' | 'burn' | 'transfer' | 'stake' | 'unstake';
+  type: 'mint' | 'burn' | 'transfer' | 'stake' | 'unstake' | 'attack';
   reason?: string;
   username?: string;
   pubkey?: string;
@@ -65,7 +65,7 @@ const VolchainActivity: React.FC<Props> = ({ autoRefreshMs }) => {
         setLoading(true);
         setError(null);
       }
-      const resp = await withRetry(`/volchain/events?limit=50&_ts=${Date.now()}`,{ method: 'GET' }, 1);
+      const resp = await withRetry(`/volchain/events?limit=200&_ts=${Date.now()}`,{ method: 'GET' }, 1);
       if (!resp.ok) throw new Error('Failed to load events');
       const data = await resp.json();
       const incoming: Event[] = Array.isArray(data?.events) ? data.events : (Array.isArray(data) ? data : []);
@@ -91,7 +91,7 @@ const VolchainActivity: React.FC<Props> = ({ autoRefreshMs }) => {
   const loadMore = useCallback(async () => {
     if (nextCursor === null) return;
     try {
-      const resp = await withRetry(`/volchain/events?limit=50&cursor=${nextCursor}&_ts=${Date.now()}`, { method: 'GET' }, 1);
+      const resp = await withRetry(`/volchain/events?limit=200&cursor=${nextCursor}&_ts=${Date.now()}`, { method: 'GET' }, 1);
       if (!resp.ok) return;
       const data = await resp.json();
       const incoming: Event[] = Array.isArray(data?.events) ? data.events : [];
@@ -108,11 +108,13 @@ const VolchainActivity: React.FC<Props> = ({ autoRefreshMs }) => {
 
   return (
     <div style={{ overflowX: 'hidden' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <strong>Recent (max 1000)</strong>
-        {!autoRefreshMs && (
-          <button className="settings-button" onClick={() => fetchEvents()} disabled={loading}>Refresh</button>
-        )}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+        <strong>Recent</strong>
+        <div style={{ display: 'flex', gap: 8 }}>
+          {!autoRefreshMs && (
+            <button className="settings-button" onClick={() => fetchEvents()} disabled={loading}>Refresh</button>
+          )}
+        </div>
       </div>
       {loading && events.length === 0 && <p>Loading events…</p>}
       {error && <p style={{ color: '#c00' }}>❌ {error}</p>}
@@ -133,18 +135,36 @@ const VolchainActivity: React.FC<Props> = ({ autoRefreshMs }) => {
           const timeEl = (
             <span style={{ color: '#666', width: 80, flex: '0 0 auto' }}>{formatTs(e.ts)}</span>
           );
+          const label = e.type.toUpperCase();
           const typeEl = (
-            <span style={{ color: '#333', width: 58, flex: '0 0 auto' }}>{e.type.toUpperCase()}</span>
+            <span style={{ color: '#333', width: 58, flex: '0 0 auto' }}>{label}</span>
           );
           let msg = '';
           if (e.type === 'mint') {
-            msg = `+${e.amount} to ${shortUser(e.username) || shortHex(e.pubkey)}`;
+            const recipient = shortUser(e.username) || shortUser(e.toUser) || shortHex(e.pubkey);
+            if (String(e.reason).toLowerCase() === 'dig') {
+              msg = `+${e.amount} to ${recipient}`;
+            } else {
+              msg = `+${e.amount} to ${recipient}`;
+            }
           } else if (e.type === 'burn') {
-            msg = `-${e.amount} from ${shortUser(e.username) || shortHex(e.pubkey)}`;
+            const reason = String(e.reason || '').toLowerCase();
+            const who = shortUser(e.username) || shortHex(e.pubkey);
+            if (reason === 'attack_burn_attacker') {
+              msg = `-${e.amount} from ${who} (burn-attack)`;
+            } else if (reason === 'attack_burn_defender') {
+              msg = `-${e.amount} from ${who} (burn-defend)`;
+            } else {
+              msg = `-${e.amount} from ${who}`;
+            }
           } else if (e.type === 'transfer') {
             const fromShort = shortUser(e.fromUser) || shortHex(e.from);
             const toShort = shortUser((e as any).toUser) || shortHex(e.to);
             msg = `${e.amount} ${fromShort}→${toShort}`;
+          } else if (e.type === 'attack') {
+            const fromShort = shortUser(e.fromUser) || shortHex(e.from);
+            const toShort = shortUser((e as any).toUser) || shortHex(e.to);
+            msg = `${fromShort}→${toShort}`;
           } else if (e.type === 'stake') {
             const amt = typeof e.amount === 'number' ? e.amount : 1;
             const who = shortUser(e.username) || shortHex(e.pubkey);

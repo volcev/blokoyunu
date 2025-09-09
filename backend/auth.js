@@ -5,6 +5,8 @@ const nodemailer = require('nodemailer');
 const bcrypt = require('bcrypt');
 // Removed Solana dependencies
 const app = express();
+const { ensureSchema, query } = require('./lib/pg');
+ensureSchema().catch(()=>{});
 const PORT = 3002;
 
 app.use(cors());
@@ -37,13 +39,10 @@ function writeAccounts(accounts) {
 }
 
 const transporter = nodemailer.createTransport({
-  host: 'smtpout.secureserver.net',
-  port: 465,
-  secure: true,
-  auth: {
-    user: 'volkan@thisisthecoin.com',
-    pass: '06Sa954371v'
-  }
+  host: process.env.SMTP_HOST,
+  port: Number(process.env.SMTP_PORT || 587),
+  secure: String(process.env.SMTP_SECURE || 'false') === 'true',
+  auth: process.env.SMTP_USER ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS } : undefined
 });
 
 function readDB() {
@@ -137,6 +136,8 @@ app.post('/signup', async (req, res) => {
   });
   writeDB(data);
 
+  try { await query('INSERT INTO users(username, email, color, password_hash, is_verified, verification_token, updated_at) VALUES($1,$2,$3,$4,$5,$6,NOW()) ON CONFLICT (username) DO UPDATE SET email=EXCLUDED.email, color=EXCLUDED.color, password_hash=EXCLUDED.password_hash, is_verified=EXCLUDED.is_verified, verification_token=EXCLUDED.verification_token, updated_at=NOW()', [username, email, color, hashedPassword, false, verificationToken]); } catch {}
+
   const verificationLink = `https://thisisthecoin.com/auth/verify-email?token=${verificationToken}&email=${email}`;
   try {
     await transporter.sendMail({
@@ -165,6 +166,7 @@ app.get('/verify-email', async (req, res) => {
   user.isVerified = true;
   user.verificationToken = null;
   writeDB(data);
+  try { await query('UPDATE users SET is_verified=TRUE, verification_token=NULL, updated_at=NOW() WHERE email=$1', [email]); } catch {}
 
   res.json('Email verified, you can now access the game');
 });
@@ -186,7 +188,7 @@ app.post('/login', async (req, res) => {
     return res.status(400).json({ error: 'Email not verified' });
   }
 
-  const isPasswordValid = true; //await bcrypt.compare(password, user.passwordHash);
+  const isPasswordValid = await bcrypt.compare(password, user.passwordHash);
   if (!isPasswordValid) {
     return res.status(400).json({ error: 'Invalid password' });
   }
@@ -196,6 +198,7 @@ app.post('/login', async (req, res) => {
   const sessions = readSessions();
   sessions[sessionToken] = { username: user.username, createdAt: Date.now() };
   writeSessions(sessions);
+  try { await query('INSERT INTO sessions(session_token, username, created_at) VALUES($1,$2,$3) ON CONFLICT (session_token) DO NOTHING', [sessionToken, user.username, Date.now()]); } catch {}
 
   res.json({ success: true, username: user.username, color: user.color, sessionToken });
 });
@@ -221,8 +224,12 @@ app.get('/user', async (req, res) => {
     return res.status(400).json({ error: 'Username is required' });
   }
 
-  const data = readDB();
-  const user = data.users.find(user => user.username === username);
+  let user = null;
+  try { const r = await query('SELECT username, email, color FROM users WHERE username=$1', [username]); user = r.rows[0]; } catch {}
+  if (!user) {
+    const data = readDB();
+    user = data.users.find(user => user.username === username);
+  }
 
   if (!user) {
     return res.status(400).json({ error: 'User not found' });
@@ -349,6 +356,7 @@ app.post('/update-color', async (req, res) => {
 
   user.color = color;
   writeDB(data);
+  try { await query('UPDATE users SET color=$2, updated_at=NOW() WHERE username=$1', [username, color]); } catch {}
 
   res.json({ message: 'Color updated successfully' });
 });
@@ -393,6 +401,7 @@ app.post('/update-username', async (req, res) => {
   writeGridB(updatedGridB);
 
   writeDB(data);
+  try { await query('UPDATE users SET username=$2, updated_at=NOW() WHERE username=$1', [currentUsername, newUsername]); } catch {}
 
   res.json({ message: 'Username updated successfully', newUsername });
 });

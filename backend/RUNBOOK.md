@@ -323,3 +323,57 @@ curl -s localhost:3001/volchain/health | jq '{
   }
 }'
 ```
+
+---
+
+## 🐘 PostgreSQL Ops & Switching to PG
+
+### Environment Setup
+Create a `.env` from `.env.example` with your PostgreSQL credentials and set `STORE_MODE`:
+```
+STORE_MODE=dual   # start here; reads PG-first with file fallback, dual-writes
+PGHOST=localhost
+PGPORT=5432
+PGUSER=volcev
+PGPASSWORD=localpg
+PGDATABASE=blokoyunu
+VOLCHAIN_ADMIN_SECRET=...secret...
+```
+
+### Initial Backfill and Verify
+```bash
+# Backfill JSON -> PG
+npm run migrate:pg
+
+# Optional: users only
+npm run backfill:users
+
+# One-off reconcile both ways (JSON↔PG)
+npm run reconcile:once
+
+# Verify parity
+npm run verify:pg | jq '.ok'
+```
+
+### Zero-Downtime Rollout
+1. Run in `STORE_MODE=dual` and monitor verify until stable (>=30 min 0 mismatch).
+2. Switch to `STORE_MODE=pg` to read/write primarily to PG (file writes remain as backup in dual store if enabled).
+3. Keep background reconcile enabled to auto-heal any drift.
+
+### Operational Checks
+```bash
+# Store health
+curl -s localhost:3001/store/health | jq
+
+# Manual reconcile trigger (if enabled)
+curl -s -X POST localhost:3001/admin/reconcile-json-to-pg \
+  -H "X-Admin-Secret: $VOLCHAIN_ADMIN_SECRET" | jq
+
+# Verify
+npm run verify:pg | jq
+```
+
+### Troubleshooting
+- If PG shows values but files do not, run `npm run reconcile:once`.
+- If files have values but PG is missing, the background job and reconcile will upsert to PG.
+- Never hand-edit JSON; use routes or reconcile tools.

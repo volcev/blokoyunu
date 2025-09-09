@@ -110,7 +110,13 @@ router.get('/stats/volchain', (req, res) => {
         userBalance = Number(balances[lower] || balances[upper] || 0);
       }
     }
-    res.json({ success: true, grid, source: 'volchain', volchain: { totalSupply, currentUser: { balance: userBalance, pubkey: userPubkey } } });
+    // Normalize: when source is volchain, minedBlocks should reflect chain total to avoid mixed-source drift
+    const normalizedGrid = {
+      ...grid,
+      minedBlocks: totalSupply,
+      totalBlocksMined: totalSupply
+    };
+    res.json({ success: true, grid: normalizedGrid, source: 'volchain', volchain: { totalSupply, currentUser: { balance: userBalance, pubkey: userPubkey } } });
   } catch (e) { res.status(500).json({ error: 'failed' }); }
 });
 

@@ -16,3 +16,9 @@ backend/keys/
 # OS/editor
 .DS_Store
 *.swp
+
+# Exclude heavy rotating backups (keep live data)
+backend/backup/
+backend/backups/
+backend/volchain_backup_*/
+
